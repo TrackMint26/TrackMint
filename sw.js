@@ -9,8 +9,10 @@
 // cached the same way the first time they're used online.
 //
 // Bump CACHE_NAME whenever this file changes so the activate step clears the
-// previous cache instead of running two cache generations side by side.
-const CACHE_NAME = "track-mint-cache-v1";
+// previous cache instead of running two cache generations side by side. Also
+// bump it any time you need to force every device to drop a stale snapshot,
+// independent of whether sw.js's own logic changed.
+const CACHE_NAME = "track-mint-cache-v2";
 
 const PRECACHE_URLS = [
   "./",
@@ -41,7 +43,15 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    fetch(event.request)
+    // { cache: "no-cache" } forces the browser to revalidate with the server
+    // (a cheap conditional GET, cheap 304 if unchanged) instead of silently
+    // reusing an unexpired HTTP cache entry — GitHub Pages serves everything
+    // with `Cache-Control: max-age=600`, and without this override a plain
+    // fetch() here could still be satisfied by that 10-minute browser cache
+    // even though this handler's intent is "always check the network first."
+    // That gap is exactly what let one device keep running months-old OCR/
+    // extraction logic while another, freshly loaded, ran the current build.
+    fetch(event.request, { cache: "no-cache" })
       .then((response) => {
         // Cache a copy of every successful response as it's fetched — this
         // is what makes the OCR engine's CDN scripts and runtime WASM/
