@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#6a3fd1" />
+    <title>Track Mint</title>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="app-icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="app-icon.png" />
+    <link rel="stylesheet" href="styles.css?v=13" />
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="sidebar">
+        <a class="brand" href="#dashboard" aria-label="Track Mint dashboard">
+          <img src="app-icon.png" alt="" />
+          <span>
+            <strong>Track Mint</strong>
+            <small>Smart expense control</small>
+          </span>
+        </a>
+
+        <nav class="nav-tabs" aria-label="Main screens">
+          <button data-screen="dashboard" class="active">Dashboard</button>
+          <button data-screen="scan">Scan Receipt</button>
+          <button data-screen="expenses">Expense List</button>
+          <button data-screen="details">Expense Details</button>
+          <button data-screen="reports">Reports</button>
+          <button data-screen="profile">User Profile</button>
+          <button data-screen="settings">Settings</button>
+        </nav>
+
+        <button class="secondary full logout-button" id="logoutButton">Logout</button>
+      </aside>
+
+      <main class="main-shell">
+        <section class="auth-screen" id="authScreen">
+          <div class="auth-card">
+            <img class="auth-logo" src="app-icon.png" alt="" />
+            <p class="eyebrow">Welcome to</p>
+            <h1>Track Mint</h1>
+            <p>Scan bills, record suppliers, monitor spend, and trigger alerts when cost thresholds are exceeded.</p>
+
+            <form id="authForm" class="auth-form">
+              <div class="mode-switch" role="tablist" aria-label="Login mode">
+                <button type="button" class="active" data-auth-mode="login">Login</button>
+                <button type="button" data-auth-mode="register">Register</button>
+              </div>
+              <label class="field">
+                <span>Name</span>
+                <input id="authName" placeholder="Business owner" />
+              </label>
+              <label class="field">
+                <span>Email</span>
+                <input id="authEmail" type="email" required placeholder="owner@example.com" />
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input id="authPassword" type="password" required placeholder="Minimum 4 characters" />
+              </label>
+              <button class="primary full" id="authSubmitButton" type="submit">Login</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="app-content" id="appContent" hidden>
+          <header class="topbar">
+            <div>
+              <p class="eyebrow" id="screenEyebrow">Track Mint</p>
+              <h1 id="screenTitle">Dashboard</h1>
+            </div>
+            <div class="top-actions">
+              <span class="offline-badge" id="offlineBadge" hidden>Offline — showing saved data</span>
+              <button class="secondary" id="quickScanButton">Scan Receipt</button>
+              <button class="icon-button" id="themeToggle" type="button" title="Toggle light and dark mode" aria-label="Toggle theme">🌙</button>
+              <button class="secondary" id="exportCsvButton" title="Export expenses as CSV" aria-label="Export expenses as CSV">Export CSV</button>
+            </div>
+          </header>
+
+          <section class="alert-panel" id="alertPanel" hidden>
+            <div>
+              <h2>Supply Expense Alert</h2>
+              <p id="alertMessage">Raw material expenses crossed the set limit.</p>
+            </div>
+            <div class="alert-actions">
+              <a class="primary sms-link" id="sendSmsButton" href="#">Send SMS Alert</a>
+              <a class="primary sms-link" id="sendEmailButton" href="#">Send Email Alert</a>
+            </div>
+          </section>
+
+          <section class="ai-procedure" aria-label="AI workflow procedure">
+            <div class="procedure-step active" data-workflow-step="capture">
+              <span>1</span>
+              <strong>Capture</strong>
+              <small>OCR invoice data</small>
+            </div>
+            <div class="procedure-step" data-workflow-step="classify">
+              <span>2</span>
+              <strong>Classify</strong>
+              <small>Supplier identity</small>
+            </div>
+            <div class="procedure-step" data-workflow-step="duplicates">
+              <span>3</span>
+              <strong>Check</strong>
+              <small>Duplicates and risk</small>
+            </div>
+            <div class="procedure-step" data-workflow-step="analytics">
+              <span>4</span>
+              <strong>Analyze</strong>
+              <small>Spend and suppliers</small>
+            </div>
+            <div class="procedure-step" data-workflow-step="alerts">
+              <span>5</span>
+              <strong>Alert</strong>
+              <small>Limits and patterns</small>
+            </div>
+          </section>
+
+          <section class="screen active" id="dashboardScreen" data-title="Dashboard" data-eyebrow="Live business view">
+            <div class="metrics" aria-label="Expense summary">
+              <article class="metric"><span>Total Spend</span><strong id="totalSpend">INR 0</strong></article>
+              <article class="metric"><span>GST Input</span><strong id="gstCredit">INR 0</strong></article>
+              <article class="metric"><span>Raw Materials</span><strong id="rawMaterialSpend">INR 0</strong></article>
+              <article class="metric"><span>Pending</span><strong id="pendingCount">0</strong></article>
+              <article class="metric"><span>Approved</span><strong id="approvedCount">0</strong></article>
+              <article class="metric"><span>Suppliers</span><strong id="supplierCount">0</strong></article>
+            </div>
+
+            <div class="dashboard-grid">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Category Spend</h2>
+                    <p>Current expense split across business categories.</p>
+                  </div>
+                </div>
+                <div id="categoryBars" class="donut-panel"></div>
+                <div id="categoryStatCards" class="mini-stat-grid"></div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Recent Expenses</h2>
+                    <p>Latest saved bills and supply purchases.</p>
+                  </div>
+                </div>
+                <div id="recentExpenses" class="mini-list"></div>
+              </section>
+
+              <section class="panel insight-panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Trend Insights</h2>
+                    <p>Automatically tracked by daily, monthly, yearly, and all-time spend.</p>
+                  </div>
+                  <div class="trend-controls" id="periodButtons">
+                    <button class="secondary active" data-period="daily">Daily</button>
+                    <button class="secondary" data-period="monthly">Monthly</button>
+                    <button class="secondary" data-period="yearly">Yearly</button>
+                    <button class="secondary" data-period="all">All</button>
+                  </div>
+                </div>
+                <div class="chart-area">
+                  <svg id="trendChart" viewBox="0 0 800 320"></svg>
+                </div>
+              </section>
+
+              <section class="panel insight-panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Supplier Spend</h2>
+                    <p>Top suppliers and spending distribution.</p>
+                  </div>
+                </div>
+                <div class="chart-area">
+                  <svg id="supplierChart" viewBox="0 0 800 320"></svg>
+                </div>
+                <div id="supplierStatCards" class="mini-stat-grid"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="screen" id="scanScreen" data-title="Scan Receipt" data-eyebrow="OCR capture">
+            <div class="workspace">
+              <div class="panel scanner-panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Scan Bill</h2>
+                    <p>Use Android, iOS, or web camera upload, then run OCR.</p>
+                  </div>
+                </div>
+
+                <label class="drop-zone" for="billImage">
+                  <input id="billImage" type="file" accept=".jpg,.jpeg,.png,.gif,.bmp,.tiff,.webp,.pdf,.txt" />
+                  <img id="previewImage" alt="" hidden />
+                  <span id="dropText">Tap to scan or upload a bill (image, PDF, or text)</span>
+                </label>
+
+                <button type="button" class="secondary full" id="takePhotoButton">Take Photo with Camera</button>
+
+                <div class="ocr-progress" id="ocrProgress" hidden>
+                  <div class="progress-bar"><span id="ocrProgressBar"></span></div>
+                  <p id="ocrStatus">Ready to scan</p>
+                </div>
+
+                <label class="field">
+                  <span>OCR / Supplier Text</span>
+                  <textarea id="ocrText" rows="8" placeholder="Example: Sharma Steel Traders&#10;Date 09/06/2026&#10;GSTIN 27ABCDE1234F1Z5&#10;Material Steel sheets&#10;Quantity 50 kg&#10;Amount INR 15000&#10;CGST INR 1350 SGST INR 1350"></textarea>
+                </label>
+
+                <div class="actions">
+                  <button class="primary" id="scanOcrButton">Scan Image OCR</button>
+                  <button class="primary" id="extractButton">Extract Supplier</button>
+                  <button class="secondary" id="sampleButton">Use Sample Bill</button>
+                </div>
+              </div>
+
+              <form class="panel expense-form" id="expenseForm">
+                <div class="panel-header">
+                  <div>
+                    <h2>Expense Details</h2>
+                    <p>Review supplier and expense data before saving.</p>
+                  </div>
+                  <select id="status">
+                    <option>Pending</option>
+                    <option>Approved</option>
+                    <option>Rejected</option>
+                  </select>
+                </div>
+
+                <div class="form-grid">
+                  <label class="field"><span>Vendor / Supplier</span><input id="vendor" required /></label>
+                  <label class="field"><span>Supplier Phone</span><input id="supplierPhone" type="tel" placeholder="Mobile number" /></label>
+                  <label class="field"><span>Date</span><input id="date" type="date" required /></label>
+                  <label class="field">
+                    <span>Category</span>
+                    <select id="category">
+                      <option>Phone / Internet</option>
+                      <option>Travel</option>
+                      <option>Food</option>
+                      <option>Office Supplies</option>
+                      <option>Rent</option>
+                      <option>Utilities</option>
+                      <option>Raw Materials</option>
+                      <option>Staff Welfare</option>
+                      <option>Other</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>Amount</span><input id="amount" type="number" min="0" step="0.01" required /></label>
+                  <label class="field"><span>GSTIN</span><input id="gstin" maxlength="15" /></label>
+                  <label class="field"><span>Tax</span><input id="tax" type="number" min="0" step="0.01" /></label>
+                  <label class="field"><span>Material Item</span><input id="materialItem" placeholder="Steel, fabric, packaging, parts" /></label>
+                  <label class="field"><span>Quantity</span><input id="quantity" placeholder="10 kg, 25 boxes, 8 units" /></label>
+                  <label class="field"><span>Notes</span><input id="notes" placeholder="Payment mode or approval comment" /></label>
+                </div>
+
+                <div class="actions">
+                  <button class="primary" type="submit">Save Expense</button>
+                  <button class="secondary" type="reset">Clear</button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <section class="screen" id="expensesScreen" data-title="Expense List" data-eyebrow="Saved ledger">
+            <section class="panel expense-ledger">
+              <div class="panel-header">
+                <div>
+                  <h2>Expense Ledger</h2>
+                  <p>Saved bills stay in this browser until cleared.</p>
+                </div>
+                <button class="secondary danger" id="clearButton">Clear All</button>
+              </div>
+              <div class="duplicate-filter-notice" id="duplicateFilterNotice" hidden>
+                <p id="duplicateFilterText"></p>
+                <button class="secondary" id="clearDuplicateFilterButton" type="button">Show All Expenses</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vendor</th>
+                      <th>Supplier Phone</th>
+                      <th>Date</th>
+                      <th>Category</th>
+                      <th>Material</th>
+                      <th>Quantity</th>
+                      <th>Amount</th>
+                      <th>GST</th>
+                      <th>Status</th>
+                      <th>Open</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="expenseRows"></tbody>
+                </table>
+                <p class="empty-state" id="emptyState">No expenses saved yet.</p>
+              </div>
+            </section>
+          </section>
+
+          <section class="screen" id="detailsScreen" data-title="Expense Details" data-eyebrow="Single record">
+            <section class="panel details-panel">
+              <div class="panel-header">
+                <div>
+                  <label class="detail-vendor-label" for="detailVendorSelect">Supplier</label>
+                  <select id="detailVendorSelect" class="detail-vendor-select">
+                    <option value="">No expense selected</option>
+                  </select>
+                  <p id="detailSummary">Open a record from the expense list to view full details.</p>
+                </div>
+                <span class="status Pending" id="detailStatus">Pending</span>
+              </div>
+              <dl class="detail-grid" id="detailGrid"></dl>
+              <div class="supplier-period-grid">
+                <div>
+                  <h3>Monthly Spend</h3>
+                  <div class="report-list" id="detailMonthlyReport"></div>
+                </div>
+                <div>
+                  <h3>Yearly Spend</h3>
+                  <div class="report-list" id="detailYearlyReport"></div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <section class="screen" id="reportsScreen" data-title="Reports & Analytics" data-eyebrow="Insights">
+            <div class="dashboard-grid">
+              <section class="panel">
+                <h2>Monthly Summary</h2>
+                <div id="monthlyReport" class="report-list"></div>
+              </section>
+              <section class="panel">
+                <h2>Supplier Summary</h2>
+                <div id="supplierReport" class="report-list"></div>
+              </section>
+              <section class="panel">
+                <h2>AI Workflow Summary</h2>
+                <div id="aiWorkflowReport" class="report-list"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="screen" id="profileScreen" data-title="User Profile" data-eyebrow="Business account">
+            <form class="panel profile-form" id="profileForm">
+              <div class="form-grid">
+                <label class="field"><span>Owner Name</span><input id="profileName" /></label>
+                <label class="field"><span>Email</span><input id="profileEmail" type="email" /></label>
+                <label class="field"><span>Business Name</span><input id="businessName" placeholder="Track Mint" /></label>
+                <label class="field"><span>Business Phone</span><input id="businessPhone" type="tel" /></label>
+                <label class="field"><span>GSTIN</span><input id="businessGstin" maxlength="15" /></label>
+                <label class="field"><span>Role</span><input id="userRole" placeholder="Owner, Accountant, Manager" /></label>
+              </div>
+              <button class="primary" type="submit">Save Profile</button>
+            </form>
+          </section>
+
+          <section class="screen" id="settingsScreen" data-title="Settings" data-eyebrow="Brand and alerts">
+            <div class="dashboard-grid">
+              <form class="panel settings-form" id="settingsForm">
+                <h2>Supply Alert Settings</h2>
+                <p class="owner-note" id="settingsOwnerNote" hidden>Only the account owner can view or change alert settings. Contact the business owner to update these.</p>
+                <label class="field"><span>Raw Material Limit</span><input id="rawMaterialLimit" type="number" min="0" step="0.01" placeholder="Monthly limit" /></label>
+                <label class="field"><span>Alert Phone</span><input id="alertPhone" type="tel" placeholder="Owner or manager mobile" /></label>
+                <label class="field"><span>Alert Email</span><input id="alertEmail" type="email" placeholder="Owner or manager email" /></label>
+                <label class="check-field"><input id="alertViaSms" type="checkbox" checked /><span>Send alerts by SMS</span></label>
+                <label class="check-field"><input id="alertViaEmail" type="checkbox" /><span>Send alerts by Email</span></label>
+                <label class="check-field"><input id="alarmEnabled" type="checkbox" checked /><span>Play alarm when raw material limit is crossed</span></label>
+                <button class="primary" type="submit" id="saveSettingsButton">Save Settings</button>
+              </form>
+
+              <section class="panel brand-guide">
+                <h2>Design Branding</h2>
+                <div class="brand-preview"><img src="app-icon.png" alt="" /><strong>Track Mint</strong></div>
+                <div class="palette">
+                  <span style="--swatch:#6a3fd1">Primary</span>
+                  <span style="--swatch:#22a06b">Accent</span>
+                  <span style="--swatch:#f4b63f">Alert</span>
+                  <span style="--swatch:#f4f0fb">Canvas</span>
+                  <span style="--swatch:#241a3a">Text</span>
+                </div>
+                <p>Typography uses Inter-style system UI fonts for Android, iOS, and web compatibility.</p>
+                <p>Install-ready metadata is included through the web app manifest and app icon.</p>
+              </section>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="chart-tooltip" id="chartTooltip" role="status" aria-live="polite" hidden></div>
+
+    <div class="camera-modal" id="cameraModal" hidden>
+      <div class="camera-modal-inner">
+        <video id="cameraVideo" autoplay playsinline muted></video>
+        <p class="camera-error" id="cameraError" hidden></p>
+        <div class="camera-modal-actions">
+          <button type="button" class="primary" id="capturePhotoButton">Capture</button>
+          <button type="button" class="secondary" id="closeCameraButton">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
+    <script>
+      // Track auth mode globally
+      window.currentAuthMode = 'login';
+    </script>
+    <script src="app.js?v=19"></script>
+    <script>
+      // Ensure auth mode buttons work
+      document.addEventListener('DOMContentLoaded', function() {
+        const authModeButtons = document.querySelectorAll('[data-auth-mode]');
+        authModeButtons.forEach(button => {
+          button.addEventListener('click', function() {
+            window.currentAuthMode = this.dataset.authMode;
+            const mode = this.dataset.authMode;
+            authModeButtons.forEach(btn => {
+              btn.classList.toggle('active', btn.dataset.authMode === mode);
+            });
+            const submitBtn = document.getElementById('authSubmitButton');
+            submitBtn.textContent = mode === 'login' ? 'Login' : 'Create Account';
+            const nameField = document.getElementById('authName');
+            nameField.parentElement.style.display = mode === 'login' ? 'none' : 'grid';
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

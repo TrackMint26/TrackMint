@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Track Mint logo</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#141d2e" />
+      <stop offset="100%" stop-color="#0a1018" />
+    </linearGradient>
+    <linearGradient id="bars" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#8a5cf6" />
+      <stop offset="55%" stop-color="#3d84ff" />
+      <stop offset="100%" stop-color="#22c98d" />
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22c98d" />
+      <stop offset="100%" stop-color="#6fe6bf" />
+    </linearGradient>
+    <linearGradient id="mGrad" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1f8f66" />
+      <stop offset="100%" stop-color="#3fd39a" />
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+
+  <path d="M158 172a148 148 0 1 1 -10 208" fill="none" stroke="url(#ring)" stroke-width="14" stroke-linecap="round" />
+
+  <rect x="150" y="288" width="28" height="68" rx="8" fill="url(#bars)" />
+  <rect x="190" y="248" width="28" height="108" rx="8" fill="url(#bars)" />
+  <rect x="230" y="304" width="28" height="52" rx="8" fill="url(#bars)" />
+
+  <path d="M164 296 C 200 320, 224 288, 300 214" fill="none" stroke="url(#bars)" stroke-width="14" stroke-linecap="round" />
+  <path d="M284 196 l30 -6 l-6 30 z" fill="url(#bars)" />
+
+  <path d="M168 168h116v32h-42v106h-32v-106h-42z" fill="#f7f9fb" />
+
+  <path d="M268 306v-104l50 58 50 -58v104h-26v-58l-24 30 -24 -30v58z" fill="url(#mGrad)" />
+
+  <circle cx="358" cy="352" r="46" fill="#0d1420" stroke="url(#ring)" stroke-width="6" />
+  <text x="358" y="369" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#5be0b3">&#8377;</text>
+</svg>

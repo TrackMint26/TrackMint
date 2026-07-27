@@ -1,0 +1,2421 @@
+const storageKey = "scanspend-expenses";
+const settingsKey = "scanspend-settings";
+const profileKey = "scanspend-profile";
+const authKey = "scanspend-user";
+const accountsKey = "scanspend-accounts";
+const legacyStorageKey = "msme-expense-scanner-expenses";
+const legacySettingsKey = "msme-expense-scanner-settings";
+const themeKey = "scanspend-theme";
+
+const readJson = (key, fallback) => JSON.parse(localStorage.getItem(key) || fallback);
+const saveJson = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+
+const loadAccounts = () => readJson(accountsKey, "{}");
+const saveAccounts = (accounts) => saveJson(accountsKey, accounts);
+const findAccountByEmail = (email) => {
+  const accounts = loadAccounts();
+  return accounts[email.toLowerCase()] || null;
+};
+
+const state = {
+  expenses: readJson(storageKey, localStorage.getItem(legacyStorageKey) || "[]"),
+  settings: readJson(settingsKey, localStorage.getItem(legacySettingsKey) || "{}"),
+  profile: readJson(profileKey, "{}"),
+  user: readJson(authKey, "null"),
+  selectedExpenseId: null,
+  authMode: "login",
+};
+
+// OCR runs entirely in the browser via Tesseract.js (WebAssembly) — no local
+// server, no installed Tesseract binary, works the same on desktop and
+// mobile browsers (Android/iOS) since it's just JS+WASM shipped with the page.
+
+const fields = {
+  authScreen: document.getElementById("authScreen"),
+  appContent: document.getElementById("appContent"),
+  authForm: document.getElementById("authForm"),
+  authName: document.getElementById("authName"),
+  authEmail: document.getElementById("authEmail"),
+  authPassword: document.getElementById("authPassword"),
+  authSubmitButton: document.getElementById("authSubmitButton"),
+  logoutButton: document.getElementById("logoutButton"),
+  navButtons: [...document.querySelectorAll("[data-screen]")],
+  authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
+  screens: [...document.querySelectorAll(".screen")],
+  screenTitle: document.getElementById("screenTitle"),
+  screenEyebrow: document.getElementById("screenEyebrow"),
+  quickScanButton: document.getElementById("quickScanButton"),
+  themeToggle: document.getElementById("themeToggle"),
+  offlineBadge: document.getElementById("offlineBadge"),
+  image: document.getElementById("billImage"),
+  preview: document.getElementById("previewImage"),
+  dropText: document.getElementById("dropText"),
+  takePhotoButton: document.getElementById("takePhotoButton"),
+  cameraModal: document.getElementById("cameraModal"),
+  cameraVideo: document.getElementById("cameraVideo"),
+  cameraError: document.getElementById("cameraError"),
+  capturePhotoButton: document.getElementById("capturePhotoButton"),
+  closeCameraButton: document.getElementById("closeCameraButton"),
+  scanOcrButton: document.getElementById("scanOcrButton"),
+  ocrProgress: document.getElementById("ocrProgress"),
+  ocrProgressBar: document.getElementById("ocrProgressBar"),
+  ocrStatus: document.getElementById("ocrStatus"),
+  ocrText: document.getElementById("ocrText"),
+  vendor: document.getElementById("vendor"),
+  supplierPhone: document.getElementById("supplierPhone"),
+  date: document.getElementById("date"),
+  category: document.getElementById("category"),
+  amount: document.getElementById("amount"),
+  gstin: document.getElementById("gstin"),
+  tax: document.getElementById("tax"),
+  materialItem: document.getElementById("materialItem"),
+  quantity: document.getElementById("quantity"),
+  notes: document.getElementById("notes"),
+  status: document.getElementById("status"),
+  rows: document.getElementById("expenseRows"),
+  empty: document.getElementById("emptyState"),
+  duplicateFilterNotice: document.getElementById("duplicateFilterNotice"),
+  duplicateFilterText: document.getElementById("duplicateFilterText"),
+  clearDuplicateFilterButton: document.getElementById("clearDuplicateFilterButton"),
+  totalSpend: document.getElementById("totalSpend"),
+  gstCredit: document.getElementById("gstCredit"),
+  pendingCount: document.getElementById("pendingCount"),
+  approvedCount: document.getElementById("approvedCount"),
+  rawMaterialSpend: document.getElementById("rawMaterialSpend"),
+  supplierCount: document.getElementById("supplierCount"),
+  alertPanel: document.getElementById("alertPanel"),
+  alertMessage: document.getElementById("alertMessage"),
+  sendSmsButton: document.getElementById("sendSmsButton"),
+  sendEmailButton: document.getElementById("sendEmailButton"),
+  categoryBars: document.getElementById("categoryBars"),
+  categoryStatCards: document.getElementById("categoryStatCards"),
+  chartTooltip: document.getElementById("chartTooltip"),
+  recentExpenses: document.getElementById("recentExpenses"),
+  trendChart: document.getElementById("trendChart"),
+  supplierChart: document.getElementById("supplierChart"),
+  supplierStatCards: document.getElementById("supplierStatCards"),
+  periodButtons: [...document.querySelectorAll("[data-period]")],
+  detailVendorSelect: document.getElementById("detailVendorSelect"),
+  detailSummary: document.getElementById("detailSummary"),
+  detailStatus: document.getElementById("detailStatus"),
+  detailGrid: document.getElementById("detailGrid"),
+  detailMonthlyReport: document.getElementById("detailMonthlyReport"),
+  detailYearlyReport: document.getElementById("detailYearlyReport"),
+  monthlyReport: document.getElementById("monthlyReport"),
+  supplierReport: document.getElementById("supplierReport"),
+  aiWorkflowReport: document.getElementById("aiWorkflowReport"),
+  workflowSteps: [...document.querySelectorAll("[data-workflow-step]")],
+  profileForm: document.getElementById("profileForm"),
+  profileName: document.getElementById("profileName"),
+  profileEmail: document.getElementById("profileEmail"),
+  businessName: document.getElementById("businessName"),
+  businessPhone: document.getElementById("businessPhone"),
+  businessGstin: document.getElementById("businessGstin"),
+  userRole: document.getElementById("userRole"),
+  settingsForm: document.getElementById("settingsForm"),
+  settingsOwnerNote: document.getElementById("settingsOwnerNote"),
+  saveSettingsButton: document.getElementById("saveSettingsButton"),
+  rawMaterialLimit: document.getElementById("rawMaterialLimit"),
+  alertPhone: document.getElementById("alertPhone"),
+  alertEmail: document.getElementById("alertEmail"),
+  alertViaSms: document.getElementById("alertViaSms"),
+  alertViaEmail: document.getElementById("alertViaEmail"),
+  alarmEnabled: document.getElementById("alarmEnabled"),
+};
+
+// The first account ever registered on this device is the business Owner.
+// Only the Owner may view or change alert contact details and spend limits.
+const isOwner = () => !!state.user?.isOwner;
+
+const formatMoney = (value) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(Number(value) || 0);
+
+// Expenses are stored as ISO "YYYY-MM-DD" (required by the native <input type="date">
+// element) but displayed as DD-MM-YYYY everywhere else in the app.
+const formatDisplayDate = (isoDate) => {
+  const match = String(isoDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return isoDate || "";
+  const [, year, month, day] = match;
+  return `${day}-${month}-${year}`;
+};
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "2026-06" -> "Jun 2026", so a different year's same month never looks like
+// a duplicate label, and multi-year monthly trends read at a glance.
+const formatMonthLabel = (isoMonth) => {
+  const match = String(isoMonth || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return isoMonth || "";
+  const [, year, month] = match;
+  const name = MONTH_ABBR[Number(month) - 1];
+  return name ? `${name} ${year}` : isoMonth;
+};
+
+const saveExpenses = () => localStorage.setItem(storageKey, JSON.stringify(state.expenses));
+const saveProfile = () => localStorage.setItem(profileKey, JSON.stringify(state.profile));
+const saveSettings = () => {
+  if (!isOwner()) return;
+  state.settings = {
+    rawMaterialLimit: fields.rawMaterialLimit.value,
+    alertPhone: fields.alertPhone.value,
+    alertEmail: fields.alertEmail.value,
+    alertViaSms: fields.alertViaSms.checked,
+    alertViaEmail: fields.alertViaEmail.checked,
+    alarmEnabled: fields.alarmEnabled.checked,
+  };
+  localStorage.setItem(settingsKey, JSON.stringify(state.settings));
+};
+
+// Non-owner users may still see the current alert configuration (for transparency)
+// but cannot edit it — only the Owner controls where alerts are sent.
+const applySettingsAccess = () => {
+  const owner = isOwner();
+  const lockedFields = [
+    fields.rawMaterialLimit,
+    fields.alertPhone,
+    fields.alertEmail,
+    fields.alertViaSms,
+    fields.alertViaEmail,
+    fields.alarmEnabled,
+  ];
+  lockedFields.forEach((field) => {
+    field.disabled = !owner;
+  });
+  fields.saveSettingsButton.disabled = !owner;
+  fields.settingsOwnerNote.hidden = owner;
+};
+
+const getPreferredTheme = () => {
+  const saved = localStorage.getItem(themeKey);
+  if (saved === "light" || saved === "dark") return saved;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+};
+
+const applyTheme = (theme) => {
+  document.documentElement.dataset.theme = theme;
+  if (fields.themeToggle) {
+    fields.themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
+    fields.themeToggle.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+    fields.themeToggle.setAttribute("aria-label", fields.themeToggle.title);
+  }
+  localStorage.setItem(themeKey, theme);
+};
+
+const today = () => new Date().toISOString().slice(0, 10);
+const isRawMaterial = (expense) => expense.category === "Raw Materials";
+const cleanPhone = (phone) => phone.replace(/[^\d+]/g, "");
+const getRawMaterialTotal = () =>
+  state.expenses.filter(isRawMaterial).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+const buildSmsUrl = (phone, message) => {
+  const separator = /iphone|ipad|ipod/i.test(navigator.userAgent) ? "&" : "?";
+  return `sms:${cleanPhone(phone)}${separator}body=${encodeURIComponent(message)}`;
+};
+
+const byAmount = (items) => items.sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
+
+const groupTotal = (items, keyFn) =>
+  items.reduce((map, item) => {
+    const key = keyFn(item) || "Unknown";
+    map[key] = (map[key] || 0) + Number(item.amount || 0);
+    return map;
+  }, {});
+
+const workflowStageByScreen = {
+  dashboard: "analytics",
+  scan: "capture",
+  expenses: "duplicates",
+  details: "duplicates",
+  reports: "analytics",
+  profile: "capture",
+  settings: "alerts",
+};
+
+const setWorkflowStage = (stage) => {
+  const order = ["capture", "classify", "duplicates", "analytics", "alerts"];
+  const activeIndex = Math.max(order.indexOf(stage), 0);
+  fields.workflowSteps.forEach((step) => {
+    const index = order.indexOf(step.dataset.workflowStep);
+    step.classList.toggle("active", index === activeIndex);
+    step.classList.toggle("complete", index < activeIndex);
+  });
+};
+
+const setScreen = (name) => {
+  // Only stop the camera when actually leaving the scan screen — setScreen
+  // re-fires for the *same* screen too (e.g. the "Scan Receipt" quick-action
+  // button present on every screen, or the async hashchange this function's
+  // own `location.hash = name` triggers), which must not kill an open camera
+  // modal the user hasn't actually navigated away from.
+  if (name !== "scan") stopCameraStream();
+  fields.screens.forEach((screen) => screen.classList.toggle("active", screen.id === `${name}Screen`));
+  fields.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.screen === name));
+  const active = document.getElementById(`${name}Screen`);
+  fields.screenTitle.textContent = active.dataset.title;
+  fields.screenEyebrow.textContent = active.dataset.eyebrow;
+  setWorkflowStage(workflowStageByScreen[name] || "capture");
+  location.hash = name;
+};
+
+const setAuthMode = (mode) => {
+  state.authMode = mode;
+  fields.authModeButtons.forEach((button) => button.classList.toggle("active", button.dataset.authMode === mode));
+  fields.authSubmitButton.textContent = mode === "login" ? "Login" : "Create Account";
+  fields.authName.parentElement.style.display = mode === "login" ? "none" : "grid";
+};
+
+const showApp = () => {
+  fields.authScreen.hidden = true;
+  fields.appContent.hidden = false;
+  const appFrame = document.querySelector('.app-frame');
+  const sidebar = document.querySelector(".sidebar");
+  if (sidebar) sidebar.hidden = false;
+  if (appFrame) appFrame.classList.remove('no-sidebar');
+  loadProfileFields();
+  loadSettingsFields();
+  render();
+  setScreen(location.hash.replace("#", "") || "dashboard");
+};
+
+const showAuth = () => {
+  fields.authScreen.hidden = false;
+  fields.appContent.hidden = true;
+  const appFrame = document.querySelector('.app-frame');
+  const sidebar = document.querySelector(".sidebar");
+  if (sidebar) sidebar.hidden = true;
+  if (appFrame) appFrame.classList.add('no-sidebar');
+};
+
+const setOcrProgress = (status, progress = 0) => {
+  fields.ocrProgress.hidden = false;
+  fields.ocrStatus.textContent = status;
+  fields.ocrProgressBar.style.width = `${Math.round(progress * 100)}%`;
+};
+
+const normalizeLines = (text) =>
+  text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s{2,}/g, " ").trim())
+    .filter(Boolean);
+
+const normalizeText = (text) =>
+  text
+    .replace(/\r?\n/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+// Tesseract frequently misreads the digit 0 as the letter O/o (and 1 as l/I) inside
+// numbers such as dates, amounts, and quantities. Only touch tokens that already
+// contain at least one real digit, so ordinary words (Other, Vendor, Steel...) are
+// left untouched.
+const fixOcrDigitConfusion = (text) =>
+  text.replace(/[A-Za-z0-9]+/g, (token) => {
+    if (!/\d/.test(token)) return token;
+    return token.replace(/[Oo]/g, "0").replace(/[lI]/g, "1");
+  });
+
+const GSTIN_PATTERN = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
+
+// OCR occasionally drops in a stray space in the middle of a GSTIN (kerning
+// artifacts, often right before the fixed "Z" checksum letter). Only merge two
+// adjacent tokens when doing so produces a structurally valid GSTIN, so this
+// never touches unrelated word pairs.
+const fixSplitGstin = (text) =>
+  text.replace(/\b([0-9A-Za-z]{2,14})\s+([0-9A-Za-z]{1,13})\b/g, (match, a, b) => {
+    const merged = (a + b).toUpperCase();
+    return GSTIN_PATTERN.test(merged) ? merged : match;
+  });
+
+// Tesseract often can't render the rupee glyph (₹) and substitutes a lookalike
+// character instead (?, f, T, €, £...). Only fix it directly in front of a
+// decimal money amount (e.g. "f576.00" -> "₹576.00") so real punctuation and
+// ordinary words elsewhere in the text are never touched.
+const fixCurrencySymbol = (text) =>
+  text.replace(/(?<![A-Za-z0-9])[?fT€£¥](?=\d[\d,]*\.\d{2}\b)/g, "₹");
+
+// Additional normalization to fix common OCR artifacts before parsing
+const normalizeOcrText = (text) => {
+  if (!text) return "";
+  let t = text;
+  // Remove unusual quotes and non-printables while preserving Unicode symbols like currency signs
+  t = t.replace(/[\u2018\u2019\u201c\u201d\u00A0]/g, "").trim();
+  // Collapse repeated horizontal whitespace only — never eat newlines here.
+  // Structured invoices (label on one line, value on the next, blank lines
+  // between sections) rely on real line breaks for extractVendorSection,
+  // parseAmount's per-line scan, etc.; collapsing "\s" (which matches \n too)
+  // used to merge whole paragraphs onto one line and broke all of that.
+  t = t.replace(/[ \t]{2,}/g, " ");
+  // Fix common OCR splitting of characters (e.g. G S T I N).
+  // Requires whitespace between every letter and a boundary before G, so it only
+  // matches a genuinely letter-spaced "G S T I N" and never merges into an
+  // unrelated adjacent word (e.g. "CGST INR" must NOT become "CGSTINR").
+  t = t.replace(/\bG\s+S\s+T\s+I\s+N/gi, "GSTIN");
+  // Common OCR misspells
+  t = t.replace(/\bvender\b/gi, "vendor");
+  t = t.replace(/\bShcll\b/gi, "Shell");
+  // Fix digit/letter confusion (0/O, 1/l/I) inside number-like tokens
+  t = fixOcrDigitConfusion(t);
+  // Rejoin a GSTIN that OCR split with a stray space
+  t = fixSplitGstin(t);
+  // Fix mangled rupee symbol in front of money amounts
+  t = fixCurrencySymbol(t);
+  // Remove only control characters, preserve currency symbols and Unicode text
+  t = t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+  return t;
+};
+
+const findSectionValue = (lines, regex) => {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const match = line.match(regex);
+    if (match && match[1] && match[1].trim()) return match[1].trim();
+    if (regex.test(line) && lines[i + 1]) return lines[i + 1].trim();
+  }
+  return "";
+};
+
+const parseDate = (text) => {
+  const monthNames = {
+    jan: "01",
+    feb: "02",
+    mar: "03",
+    apr: "04",
+    may: "05",
+    jun: "06",
+    jul: "07",
+    aug: "08",
+    sep: "09",
+    oct: "10",
+    nov: "11",
+    dec: "12",
+  };
+
+  const candidateTexts = [];
+  const normalized = normalizeText(text);
+  if (normalized) candidateTexts.push(normalized);
+  normalizeLines(text).forEach((line) => {
+    if (line) candidateTexts.push(line);
+  });
+
+  const formatDate = (year, month, day) => {
+    const parsedMonth = Number(month);
+    const parsedDay = Number(day);
+    if (parsedMonth >= 1 && parsedMonth <= 12 && parsedDay >= 1 && parsedDay <= 31) {
+      return `${year}-${String(parsedMonth).padStart(2, "0")}-${String(parsedDay).padStart(2, "0")}`;
+    }
+    return "";
+  };
+
+  for (const candidate of candidateTexts) {
+    const compact = candidate.replace(/\s+/g, " ").trim();
+
+    const isoMatch = compact.match(/\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b/);
+    if (isoMatch) {
+      const [, year, month, day] = isoMatch;
+      const formatted = formatDate(year, month, day);
+      if (formatted) return formatted;
+    }
+
+    const numericMatch = compact.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b/);
+    if (numericMatch) {
+      const [, first, second, third] = numericMatch;
+      const year = third.length === 2 ? `20${third}` : third;
+      const formatted = formatDate(year, second, first);
+      if (formatted) return formatted;
+    }
+
+    const textMatch = compact.match(/\b(\d{1,2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{4})\b/i);
+    if (textMatch) {
+      const [, day, monthName, year] = textMatch;
+      const month = monthNames[monthName.slice(0, 3).toLowerCase()];
+      return `${year}-${month}-${day.padStart(2, "0")}`;
+    }
+
+    const labeledMatch = compact.match(/(?:date|invoice date|bill date|invoice\s*date|bill\s*date)\s*[:\-]?\s*(\d{1,2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{4})/i);
+    if (labeledMatch) {
+      const [, day, monthName, year] = labeledMatch;
+      const month = monthNames[monthName.slice(0, 3).toLowerCase()];
+      return `${year}-${month}-${day.padStart(2, "0")}`;
+    }
+
+    const labeledNumericMatch = compact.match(/(?:date|invoice date|bill date|invoice\s*date|bill\s*date)\s*[:\-]?\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/i);
+    if (labeledNumericMatch) {
+      const [, first, second, third] = labeledNumericMatch;
+      const year = third.length === 2 ? `20${third}` : third;
+      const formatted = formatDate(year, second, first);
+      if (formatted) return formatted;
+    }
+  }
+
+  return "";
+};
+
+const parseAmountLegacy = (text) => {
+  const lines = normalizeLines(text);
+  const labelPattern = /(?:grand total|invoice total|total amount|amount payable|net amount|balance due|amount due|final amount|total payable)\D{0,20}([\d,]+(?:\.\d{1,2})?)/i;
+
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const match = lines[i].match(labelPattern);
+    if (match) return Number(match[1].replace(/,/g, ""));
+  }
+
+  const currencyPattern = /(?:[₹$€£¥]|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)/i;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const match = lines[i].match(currencyPattern);
+    if (match) return Number(match[1].replace(/,/g, ""));
+  }
+
+  const values = [...text.matchAll(/[\d,]+(?:\.\d{1,2})?/g)]
+    .map((match) => Number(match[0].replace(/,/g, "")))
+    .filter((value) => value > 0);
+  return values.length ? Math.max(...values) : 0;
+};
+
+const parseTaxLegacy = (text) => {
+  let cgst = 0;
+  let sgst = 0;
+  for (const match of text.matchAll(/\b(cgst|sgst)\b\D{0,20}([\d,]+(?:\.\d{1,2})?)/gi)) {
+    const type = match[1].toLowerCase();
+    const value = Number(match[2].replace(/,/g, ""));
+    if (type === "cgst") cgst += value;
+    if (type === "sgst") sgst += value;
+  }
+  if (cgst || sgst) return cgst + sgst;
+
+  const lines = normalizeLines(text);
+  const taxValues = lines
+    .filter((line) => /(?:tax|gst)/i.test(line))
+    .flatMap((line) => [...line.matchAll(/([\d,]+(?:\.\d{1,2})?)/g)].map((match) => Number(match[1].replace(/,/g, ""))));
+
+  if (taxValues.length) return taxValues.reduce((sum, value) => sum + value, 0);
+
+  const genericMatch = text.match(/tax\s*[:\-]?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  return genericMatch ? Number(genericMatch[1].replace(/,/g, "")) : 0;
+};
+
+const parseAmount = (text) => {
+  const lines = normalizeLines(text);
+  const taxLinePattern = /\b(?:cgst|sgst|igst|gstin|tax)\b/i;
+  const labelPattern = /(?:grand total|invoice total|total amount|amount payable|net amount|balance due|amount due|final amount|total payable|^amount\b)\D{0,30}([\d,]+(?:\.\d{1,2})?)/i;
+
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (taxLinePattern.test(lines[i])) continue;
+    const match = lines[i].match(labelPattern);
+    if (match) return Number(match[1].replace(/,/g, ""));
+  }
+
+  const currencyPattern = /(?:[₹$€£¥]|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)/i;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (taxLinePattern.test(lines[i])) continue;
+    const match = lines[i].match(currencyPattern);
+    if (match) return Number(match[1].replace(/,/g, ""));
+  }
+
+  // Last resort: no label or currency symbol matched at all (common on badly
+  // garbled OCR text). Prefer amounts written with cents — the standard money
+  // format on a bill — over bare whole numbers; this also stops an ID number
+  // (FSSAI/GSTIN digits/phone number) from being mistaken for the total just
+  // because it's numerically bigger.
+  const rawNumbers = [...text.matchAll(/[\d,]+(?:\.\d{1,2})?/g)]
+    .map((match) => match[0].replace(/,/g, ""))
+    .filter((raw) => Number(raw) > 0);
+
+  const decimalValues = rawNumbers.filter((raw) => raw.includes(".")).map(Number);
+  if (decimalValues.length) return Math.max(...decimalValues);
+
+  // No decimal amount anywhere — fall back to whole numbers, but cap the
+  // digit count so a long ID number can't pass as a rupee amount.
+  const wholeValues = rawNumbers.filter((raw) => raw.length <= 7).map(Number);
+  return wholeValues.length ? Math.max(...wholeValues) : 0;
+};
+
+const parseTax = (text) => {
+  // Allow an optional "(9%)" rate call-out between the label and the amount
+  // (e.g. "CGST (9%): ₹576.00") so the rate digit isn't mistaken for the amount.
+  // Rate is captured too (see cross-check below).
+  const taxPattern = /\b(cgst|sgst|igst)\b\s*(?:\(\s*([\d.]+)\s*%?\s*\))?\s*[:\-]?\s*[^\d\n]{0,20}([\d,]+(?:\.\d{1,2})?)/gi;
+  const entries = [...text.matchAll(taxPattern)].map((match) => ({
+    type: match[1].toLowerCase(),
+    rate: match[2] ? Number(match[2]) : null,
+    value: Number(match[3].replace(/,/g, "")),
+  }));
+  if (entries.length) {
+    // CGST and SGST are always levied at the same rate on the same base for
+    // intra-state supply. Tesseract occasionally misreads the ₹ symbol as a
+    // bare digit glued directly onto one amount (e.g. "3576.00" for a true
+    // "₹576.00") — when both lines state the same explicit rate but parse to
+    // different amounts, that stray digit is far more likely than a genuine
+    // mismatch, so trust the smaller, mutually-consistent reading.
+    const cgst = entries.find((entry) => entry.type === "cgst");
+    const sgst = entries.find((entry) => entry.type === "sgst");
+    if (cgst && sgst && cgst.rate !== null && cgst.rate === sgst.rate && cgst.value !== sgst.value) {
+      const shared = Math.min(cgst.value, sgst.value);
+      cgst.value = shared;
+      sgst.value = shared;
+    }
+    const total = entries.reduce((sum, entry) => sum + entry.value, 0);
+    if (total) return total;
+  }
+
+  // Fallback: take only the last number on each tax-related line (the amount),
+  // not every number on the line, so an embedded rate like "(9%)" isn't summed in.
+  const taxValues = normalizeLines(text)
+    .filter((line) => /(?:tax|gst)/i.test(line) && !/\bgstin\b/i.test(line))
+    .map((line) => {
+      const numbers = [...line.matchAll(/([\d,]+(?:\.\d{1,2})?)/g)];
+      return numbers.length ? Number(numbers[numbers.length - 1][1].replace(/,/g, "")) : 0;
+    })
+    .filter((value) => value > 0);
+
+  if (taxValues.length) return taxValues.reduce((sum, value) => sum + value, 0);
+
+  const genericMatch = text.match(/tax\s*[:\-]?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  return genericMatch ? Number(genericMatch[1].replace(/,/g, "")) : 0;
+};
+
+const cleanVendorName = (value) =>
+  value
+    .replace(/^(?:vendor\s*details|supplier\s*details|seller\s*details|seller\s*information|supplier\s*information)\s*[:\-]?\s*/i, "")
+    .replace(/^(?:vendor\s*name|supplier\s*name|seller\s*name|vendor|supplier|bill\s*to|ship\s*to|invoice\s*to|from)\s*[:\-]?\s*/i, "")
+    .replace(/\s*[:\-]\s*$/, "")
+    .trim();
+
+const extractLabeledVendorName = (lines) => {
+  // Join with newlines (not spaces) so the capture below, which stops at the
+  // end of the line, can't run on and swallow the GSTIN/Address lines that follow.
+  const joined = lines.join("\n");
+  const match = joined.match(/\b(?:vendor|supplier|seller)\s*name\s*[:\-]\s*([^|,;\n\r]+)/i);
+  return match ? match[1].trim() : "";
+};
+
+const extractVendorSection = (text) => {
+  const lines = normalizeLines(text);
+
+  const vendorSectionHeaders = [
+    /\b(?:vendor details|supplier details|seller details|seller information|supplier information|vender details|sold by|bill from|bill from details)\b/i,
+  ];
+  const vendorLabelPatterns = [
+    /(?:vendor name|supplier name|seller name|supplier|vendor|seller)\s*[:\-]?/i,
+  ];
+  const sectionEndPatterns = [
+    /^(?:expense details|bill summary|bill details|expense summary|grand total|total|amount due|payment terms|notes|signature|authorized by|terms and conditions)\s*[:\-]?/i,
+  ];
+
+  const findSectionEnd = (startIndex) => {
+    for (let i = startIndex; i < lines.length; i += 1) {
+      if (sectionEndPatterns.some((pattern) => pattern.test(lines[i]))) {
+        return i;
+      }
+    }
+    return lines.length;
+  };
+
+  let vendorStartIdx = -1;
+  for (const headerRegex of vendorSectionHeaders) {
+    vendorStartIdx = lines.findIndex((line) => headerRegex.test(line));
+    if (vendorStartIdx >= 0) break;
+  }
+
+  if (vendorStartIdx >= 0) {
+    const vendorEndIdx = findSectionEnd(vendorStartIdx + 1);
+    return lines.slice(vendorStartIdx + 1, vendorEndIdx);
+  }
+
+  let vendorLabelIdx = -1;
+  for (const labelRegex of vendorLabelPatterns) {
+    vendorLabelIdx = lines.findIndex((line) => labelRegex.test(line));
+    if (vendorLabelIdx >= 0) break;
+  }
+
+  if (vendorLabelIdx >= 0) {
+    return lines.slice(vendorLabelIdx, Math.min(vendorLabelIdx + 6, lines.length));
+  }
+
+  return [];
+};
+
+const hasExplicitVendorSection = (text) => extractVendorSection(text).length > 0;
+
+const extractVendorGstin = (text) => {
+  const gstinPattern = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i;
+  const vendorLines = extractVendorSection(text);
+
+  // 1) Look for labeled GSTIN within vendor section
+  if (vendorLines.length >= 1) {
+    const gstinLabelMatch = vendorLines.find((line) => /^(?:vendor\s+gstin|supplier\s+gstin|seller\s+gstin|vender\s+gstin)\s*[:\-]?\s*(.+)$/i.test(line));
+    if (gstinLabelMatch) {
+      const match = gstinLabelMatch.match(gstinPattern);
+      if (match) return match[0].toUpperCase();
+    }
+
+    // 2) First strict GSTIN in vendor block
+    for (const line of vendorLines) {
+      const match = line.match(gstinPattern);
+      if (match) return match[0].toUpperCase();
+    }
+  }
+
+  // 3) Tolerant search across whole document: compact non-alphanumerics and check 15-char tokens
+  const compact = text.replace(/[^A-Za-z0-9]/g, "");
+  const candidates = [...compact.matchAll(/[A-Za-z0-9]{15}/g)].map((m) => m[0].toUpperCase());
+  for (const cand of candidates) {
+    if (/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/.test(cand)) return cand;
+  }
+
+  // 4) Final strict fallback anywhere in document
+  const fullMatch = text.match(gstinPattern);
+  return fullMatch ? fullMatch[0].toUpperCase() : "";
+};
+
+// Find line index containing a GSTIN-like token within an array of lines (tolerant)
+const findGstinIndexInLines = (lines) => {
+  const strict = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (strict.test(line)) return i;
+    const compact = line.replace(/[^A-Za-z0-9]/g, "");
+    if (/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/.test(compact.toUpperCase())) return i;
+  }
+  return -1;
+};
+
+const tidyVendor = (value) =>
+  cleanVendorName(value)
+    .replace(/\b(?:Ho\.?|No\.?|Address|Addr\.?|Ph\.?|Phone|Mobile|Tel|GSTIN|CSTIN)\b.*$/i, "")
+    .replace(/\s{2,}/g, " ")
+    .slice(0, 80)
+    .trim();
+
+const guessVendor = (text) => {
+  // normalize OCR noise before extracting vendor lines
+  const normalizedText = normalizeOcrText(text);
+  const vendorLines = extractVendorSection(normalizedText);
+
+  if (vendorLines.length) {
+    const labeledName = extractLabeledVendorName(vendorLines);
+    if (labeledName) return tidyVendor(labeledName);
+  }
+
+  // Use vendor section when present, otherwise use the top lines from the document
+  const lines = vendorLines.length ? vendorLines : normalizeLines(normalizedText).slice(0, 8);
+
+  const companyKeywords = /pvt\.?|ltd\.?|inc\.?|corp\.?|company|solutions|supplies|traders|enterprises|group|industries|manufacturing|services|llp|llc|pte|works|contractors|motors|stores|mart/i;
+  const noisePatterns = /^(?:invoice|bill|date|gstin|total|amount|tax|subtotal|qty|quantity|gst|cgst|sgst|igst|rupee|inr|amount due|phone|mobile|tel|gst no)/i;
+
+  const candidates = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    const cleaned = raw.replace(/[^A-Za-z0-9 &\-\/\.,'()]/g, " ").replace(/\s{2,}/g, " ").trim();
+    if (cleaned) candidates.push({ text: cleaned, idx: i });
+    // also consider adjacent two-line combo (common in long vendor names)
+    if (i + 1 < lines.length) {
+      const nextClean = lines[i + 1].replace(/[^A-Za-z0-9 &\-\/\.,'()]/g, " ").replace(/\s{2,}/g, " ").trim();
+      const combo = `${cleaned} ${nextClean}`.trim();
+      if (combo && combo.length > cleaned.length) candidates.push({ text: combo, idx: i });
+    }
+  }
+
+  if (!candidates.length) return "Unknown Vendor";
+
+  // Score candidates heuristically
+  candidates.forEach((c) => {
+    let score = 0;
+    if (companyKeywords.test(c.text)) score += 30;
+    if (/\b(co|company|and|&|&amp;)\b/i.test(c.text) && c.text.split(/\s+/).length >= 2) score += 6;
+    if (/^[A-Z0-9][A-Za-z0-9\s\&\-\.']+$/.test(c.text) && c.text.split(/\s+/).length >= 2) score += 8;
+    if (noisePatterns.test(c.text)) score -= 25;
+    if (/\b(gstin|gst no|gst\b)/i.test(c.text)) score -= 10;
+    if (/\b(\d{2,})\b/.test(c.text) && c.text.split(/\s+/).length <= 2) score -= 8; // likely an invoice id or code
+    if (/₹|rs\.?|inr/i.test(c.text)) score -= 20;
+    if (c.text.length > 80) score -= 5; // too long often contains address lines
+    if (c.text.length <= 60 && c.text.length >= 3) score += 2;
+    c.score = score;
+  });
+
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (best && best.score > 0) return tidyVendor(best.text);
+
+  // Fallback: pick first non-noise line
+  const fallback = lines.find((line) => line.length > 3 && !noisePatterns.test(line));
+  if (fallback) return tidyVendor(fallback);
+
+  // If a GSTIN exists near vendor area, prefer the line above it as vendor name
+  const gstinIdx = findGstinIndexInLines(lines);
+  if (gstinIdx >= 0) {
+    for (let j = gstinIdx - 1; j >= Math.max(0, gstinIdx - 4); j -= 1) {
+      const candidate = lines[j].trim();
+      if (candidate && !noisePatterns.test(candidate) && candidate.length > 3) return tidyVendor(candidate);
+    }
+    // try just below if not found above
+    if (lines[gstinIdx + 1]) return tidyVendor(lines[gstinIdx + 1]);
+  }
+
+  return "Unknown Vendor";
+};
+
+// Bills use many everyday synonyms for "phone number", not just the word
+// "Phone" — Contact, Cell, Mob, WhatsApp, Helpline, Landline, "Reach us at"
+// are all common in day-to-day/reporting language. Try each label pattern in
+// turn, then fall back to a bare 10-digit Indian mobile number if no label
+// is present at all (tolerating the common "XXXXX XXXXX" spacing).
+const PHONE_LABEL_WORD = "(?:phone|mobile|contact|tel(?:ephone)?|cell|mob|ph|call(?:\\s*us)?|whatsapp|helpline|landline)";
+const PHONE_PATTERNS = [
+  new RegExp(`${PHONE_LABEL_WORD}\\s*(?:no\\.?|number|num\\.?|details?)?\\s*[:\\-]?\\s*([\\d\\s+()-]{8,})`, "i"),
+  /reach(?:\s*(?:us|out))?\s*(?:at|on)?\s*[:\-]?\s*([\d\s+()-]{8,})/i,
+];
+
+const findPhoneNumber = (text) => {
+  for (const pattern of PHONE_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) return match[1].replace(/[^\d+]/g, "");
+  }
+  const bare = text.match(/(?:\+91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}\b/);
+  return bare ? bare[0].replace(/[^\d+]/g, "") : "";
+};
+
+const guessPhone = (text) => {
+  const vendorLines = extractVendorSection(text);
+  if (vendorLines.length === 0) return ""; // No vendor section found
+  return findPhoneNumber(vendorLines.join(" "));
+};
+
+const guessMaterialItem = (text) => {
+  const lines = normalizeLines(text);
+
+  const labeledLine = lines.find((line) => /^material(?:\s*(?:item|description))?\s*[:\-]?\s+\S/i.test(line));
+  if (labeledLine) {
+    const labeled = labeledLine.replace(/^material(?:\s*(?:item|description))?\s*[:\-]?\s*/i, "").trim();
+    if (labeled) return labeled;
+  }
+
+  // Look for "Expense Details" or "Item Description" section
+  let expenseSectionIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^(?:expense details|item description|items|services|products)\s*[:\-]?\s*$/i.test(lines[i]) || 
+        /item|description|material|product/.test(lines[i]) && /qty|quantity|unit price|amount/i.test(lines[i])) {
+      expenseSectionIdx = i;
+      break;
+    }
+  }
+  
+  // Extract items from the table/section
+  if (expenseSectionIdx >= 0) {
+    for (let i = expenseSectionIdx + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      // Skip the table's own column-header row (e.g. "Item Description
+      // Category Quantity Unit Price Amount") — it matches the same
+      // item+qty/amount shape used to find expenseSectionIdx above, so
+      // without an explicit skip it gets mistaken for the item itself.
+      if (/item|description|material|product/i.test(line) && /qty|quantity|unit price|amount/i.test(line)) {
+        continue;
+      }
+      // Skip headers, totals, metadata
+      if (/^(?:subtotal|cgst|sgst|igst|tax|total|balance|payment|approval|submitted|approved|grand)/i.test(line) ||
+          /(?:qty|quantity|unit price|amount|rate|₹|\d{1,2}%)/i.test(line)) {
+        if (/[A-Z][a-z]+/.test(line) && !/(?:qty|quantity|amount|rate|price|₹|\%)/i.test(line.split(/\s+/)[0])) {
+          return line.split(/(?:\d+|\s{2,})/)[0].trim();
+        }
+        continue;
+      }
+      // Return first meaningful item description
+      if (line.length > 5 && !/^[0-9]/.test(line)) {
+        return line;
+      }
+    }
+  }
+  
+  // Fallback: Look for known material keywords
+  const known = text.match(/steel|cement|fabric|packaging|parts|timber|plastic|copper|aluminium|paper|ink|stationery|supplies|cartridge|kit/i);
+  return known ? known[0] : "";
+};
+
+const guessQuantity = (text) => {
+  // Look in expense details section first
+  const lines = normalizeLines(text);
+  let expenseSectionIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^(?:expense details|item description|items)\s*[:\-]?\s*$/i.test(lines[i]) || 
+        /item|description/.test(lines[i]) && /qty|quantity|unit price/.test(lines[i])) {
+      expenseSectionIdx = i;
+      break;
+    }
+  }
+  
+  let searchText = text;
+  if (expenseSectionIdx >= 0) {
+    searchText = lines.slice(expenseSectionIdx, Math.min(expenseSectionIdx + 10, lines.length)).join(" ");
+  }
+  
+  const quantity = searchText.match(/\b(\d+(?:\.\d+)?)\s*(?:kg|kgs|ton|tons|box|boxes|unit|units|pcs|pieces|ltr|litre|litres|l|mtr|meter|meters|ream|reams)\b/i);
+  return quantity ? quantity[0] : "";
+};
+
+const guessCategory = (text) => {
+  const lower = text.toLowerCase();
+  
+  // Check for vendor category clues in materials/items.
+  // "vi" and "rent" are word-bounded — unbounded they matched the "vi" inside
+  // "visit"/"visiting" (Phone/Internet false positive) and the "rent" inside
+  // "current"/"different" (Rent false positive) on real bill text.
+  if (/printer|paper|ink|cartridge|stationery|office/.test(lower)) return "Office Supplies";
+  if (/airtel|jio|\bvi\b|vodafone|bsnl|phone|mobile|broadband|internet|telecom/.test(lower)) return "Phone / Internet";
+  if (/uber|ola|fuel|petrol|diesel|unleaded|rail|flight|hotel|travel|cab|taxi/.test(lower)) return "Travel";
+  if (/restaurant|food|cafe|swiggy|zomato|meal|lunch|dinner/.test(lower)) return "Food";
+  if (/\brent\b|lease|property/.test(lower)) return "Rent";
+  if (/electric|power|water|utility|gas|supply|energy/.test(lower)) return "Utilities";
+  if (/raw|material|steel|cement|fabric|parts|goods|product|chemicals|metal|plastic|wood/.test(lower)) return "Raw Materials";
+  
+  return "Other";
+};
+
+const guessVendorFromLines = (lines) => {
+  const labeled = extractLabeledVendorName(lines);
+  return labeled ? tidyVendor(labeled) : guessVendor(lines.join("\n"));
+};
+
+const guessPhoneFromLines = (lines) => findPhoneNumber(lines.join(" "));
+
+const extractVendorGstinFromLines = (lines) => {
+  const match = lines.join(" ").match(/\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i);
+  return match ? match[0].toUpperCase() : "";
+};
+
+const extractVendorAddress = (lines) =>
+  lines
+    .filter((line) => {
+      const cleaned = cleanVendorName(line);
+      return (
+        cleaned &&
+        !new RegExp(`^${PHONE_LABEL_WORD}\\b`, "i").test(cleaned) &&
+        !/^(?:reach|gstin|gst no|vendor|supplier|seller)\b/i.test(cleaned)
+      );
+    })
+    .slice(1, 4)
+    .map((line) => line.replace(/^(?:address|addr\.?)\s*[:\-]?\s*/i, "").trim())
+    .join(", ");
+
+const clearNonSupplierOcrFields = () => {
+  fields.category.value = "Other";
+  fields.amount.value = "";
+  fields.tax.value = "";
+  fields.materialItem.value = "";
+  fields.quantity.value = "";
+};
+
+const extractDetails = () => {
+  const raw = fields.ocrText.value || "";
+  const text = normalizeOcrText(raw.trim());
+  if (!text) {
+    alert("Paste bill text or use the sample bill first.");
+    return;
+  }
+  clearNonSupplierOcrFields();
+  const normalizedDate = parseDate(text);
+  if (normalizedDate) {
+    fields.date.value = normalizedDate;
+  }
+
+  const amount = parseAmount(text);
+  fields.amount.value = amount ? amount : "";
+  const tax = parseTax(text);
+  fields.tax.value = tax ? tax : "";
+  fields.materialItem.value = guessMaterialItem(text);
+  fields.quantity.value = guessQuantity(text);
+  fields.category.value = guessCategory(text);
+
+  // Prefer strict vendor section extraction when the document contains an explicit Vendor/Supplier area
+  if (hasExplicitVendorSection(text)) {
+    const vendorLines = extractVendorSection(text);
+    fields.vendor.value = guessVendorFromLines(vendorLines);
+    fields.supplierPhone.value = guessPhoneFromLines(vendorLines);
+    fields.gstin.value = extractVendorGstinFromLines(vendorLines);
+    const address = extractVendorAddress(vendorLines);
+    fields.notes.value = "Captured from Track Mint OCR" + (address ? ` | Vendor Address: ${address}` : "");
+  } else {
+    fields.vendor.value = guessVendor(text);
+    fields.supplierPhone.value = guessPhone(text) || guessPhoneFromLines(normalizeLines(text));
+    fields.gstin.value = extractVendorGstin(text);
+    fields.notes.value = "Captured from Track Mint OCR";
+  }
+  setWorkflowStage("classify");
+};
+
+const dataURLToBlob = (dataURL) => {
+  const [prefix, base64] = dataURL.split(",");
+  const contentType = prefix.split(":")[1].split(";")[0];
+  const raw = atob(base64);
+  const rawLength = raw.length;
+  const uInt8Array = new Uint8Array(rawLength);
+  for (let i = 0; i < rawLength; i += 1) {
+    uInt8Array[i] = raw.charCodeAt(i);
+  }
+  return new Blob([uInt8Array], { type: contentType });
+};
+
+const pdfToImageBlob = async (file) => {
+  if (!window.pdfjsLib) {
+    throw new Error("PDF support not loaded.");
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  // A PDF page's point-size doesn't tell you the resolution of a photo
+  // embedded inside it — testing against a real receipt PDF found the source
+  // photo was ~3680px on its long edge while a scale of 2.2 was only
+  // rendering ~1700px, throwing away real detail Tesseract could have used.
+  // A higher scale costs some render time but never loses information.
+  const viewport = page.getViewport({ scale: 4 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const context = canvas.getContext("2d");
+  await page.render({ canvasContext: context, viewport }).promise;
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (blob) return resolve(blob);
+      const dataUrl = canvas.toDataURL("image/png");
+      resolve(dataURLToBlob(dataUrl));
+    }, "image/png");
+  });
+};
+
+const extractPdfText = async (file) => {
+  if (!window.pdfjsLib) {
+    throw new Error("PDF support not loaded.");
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let text = "";
+  for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
+    const page = await pdf.getPage(pageIndex);
+    const content = await page.getTextContent();
+    text += content.items.map((item) => item.str).join(" ") + " \n ";
+  }
+  return text.replace(/\s{2,}/g, " ").trim();
+};
+
+const preprocessImageBlob = async (blob) => {
+  const imageUrl = URL.createObjectURL(blob);
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = imageUrl;
+  });
+  URL.revokeObjectURL(imageUrl);
+
+  // Scale toward a target long-edge resolution rather than always doubling —
+  // a low-res upload gets boosted for better OCR detail, but a modern phone
+  // camera photo (already 3000-4000px+) doesn't get needlessly blown up
+  // further, which would just cost memory/time on mobile for no benefit.
+  const TARGET_LONG_EDGE = 2800;
+  const longEdge = Math.max(img.naturalWidth, img.naturalHeight, 1);
+  const scale = Math.min(3, Math.max(0.5, TARGET_LONG_EDGE / longEdge));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    data[i] = data[i + 1] = data[i + 2] = gray;
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  return new Promise((resolve) => canvas.toBlob((processed) => resolve(processed), "image/png"));
+};
+
+// A single reusable Tesseract.js worker — the WASM core + English language
+// data (~2-4MB) load once per session on first scan, not on every scan.
+let ocrWorkerPromise = null;
+
+const getOcrWorker = () => {
+  if (!ocrWorkerPromise) {
+    if (!window.Tesseract) {
+      throw new Error("OCR engine failed to load — check your internet connection and reload the page.");
+    }
+    ocrWorkerPromise = Tesseract.createWorker("eng", 1, {
+      logger: (message) => {
+        if (!message || !message.status) return;
+        if (message.status === "recognizing text") {
+          setOcrProgress("Reading bill text...", 0.5 + (message.progress || 0) * 0.5);
+        } else {
+          setOcrProgress(`Loading OCR engine (${message.status})...`, (message.progress || 0) * 0.5);
+        }
+      },
+    }).then(async (worker) => {
+      // PSM 6 (uniform block of text) tested most reliably against real
+      // receipts — sparser modes (4/11) misread a receipt's dashed/starred
+      // border patterns as extra text columns and injected garbage lines.
+      await worker.setParameters({ tessedit_pageseg_mode: "6" });
+      return worker;
+    });
+  }
+  return ocrWorkerPromise;
+};
+
+const runBrowserOcr = async (file) => {
+  const blobToSend = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+    ? await pdfToImageBlob(file)
+    : await preprocessImageBlob(file);
+
+  if (!blobToSend) {
+    throw new Error("Failed to prepare the image for OCR.");
+  }
+
+  const worker = await getOcrWorker();
+  const { data } = await worker.recognize(blobToSend);
+  return (data?.text || "").trim();
+};
+
+const runImageOcr = async () => {
+  const file = fields.image.files[0];
+  if (!file) {
+    alert("Upload or capture a bill image first.");
+    return;
+  }
+  if (file.type === "text/plain") {
+    const text = await file.text();
+    fields.ocrText.value = text;
+    extractDetails();
+    setOcrProgress("Text loaded from file. Supplier details populated.", 1);
+    return;
+  }
+  let ocrFile = file;
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    try {
+      setOcrProgress("Rendering first page of PDF for OCR...", 0.15);
+      const imageBlob = await pdfToImageBlob(file);
+      if (!imageBlob) throw new Error("Failed to render PDF page.");
+      ocrFile = new File([imageBlob], "bill-preview.png", { type: "image/png" });
+    } catch (error) {
+      alert("Unable to read PDF. Please use an image bill or plain text file.");
+      setOcrProgress("PDF reading failed.", 1);
+      return;
+    }
+  }
+
+  try {
+    setOcrProgress("Starting OCR...", 0.05);
+    const text = await runBrowserOcr(ocrFile);
+    if (text) {
+      fields.ocrText.value = text;
+      extractDetails();
+      setOcrProgress("OCR complete. Supplier details extracted.", 1);
+      return;
+    }
+    setOcrProgress("No text detected in the image. Try a clearer photo.", 1);
+  } catch (error) {
+    console.warn("Browser OCR failed:", error);
+    setOcrProgress("OCR failed. Check your internet connection (needed once, to load the OCR engine) and try again.", 1);
+  }
+};
+
+const playAlarm = () => {
+  if (!fields.alarmEnabled.checked) return;
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const context = new AudioContext();
+    const now = context.currentTime;
+    [0, 0.22, 0.44].forEach((offset) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "square";
+      oscillator.frequency.setValueAtTime(880, now + offset);
+      gain.gain.setValueAtTime(0.001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.16);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now + offset);
+      oscillator.stop(now + offset + 0.18);
+    });
+  } catch (error) {
+    // Some browsers block audio when permission is unavailable.
+  }
+};
+
+const getAlertPhone = () => {
+  const explicit = state.settings.alertPhone?.trim();
+  if (explicit) return explicit;
+  return state.profile.businessPhone?.trim() || "";
+};
+
+const getAlertEmail = () => {
+  const explicit = state.settings.alertEmail?.trim();
+  if (explicit) return explicit;
+  return state.profile.email?.trim() || "";
+};
+
+const buildMailtoUrl = (email, subject, message) =>
+  `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
+
+const showSupplyAlert = (expense, rawTotal, limit, playSound = true) => {
+  const phone = getAlertPhone();
+  const email = getAlertEmail();
+  const smsEnabled = state.settings.alertViaSms !== false;
+  const emailEnabled = !!state.settings.alertViaEmail;
+  const targetLabel = "Owner/Manager";
+  const message = [
+    "Track Mint alert: supply expense limit crossed.",
+    `Raw material spend: INR ${formatMoney(rawTotal)}.`,
+    `Limit: INR ${formatMoney(limit)}.`,
+    `Supplier: ${expense.vendor || "Not entered"}.`,
+    `Material: ${expense.materialItem || "Not entered"}.`,
+    `Latest expense: INR ${formatMoney(expense.amount)}.`,
+  ].join(" ");
+  fields.alertPanel.hidden = false;
+  fields.alertMessage.textContent = message;
+
+  const showSms = smsEnabled;
+  fields.sendSmsButton.hidden = !showSms;
+  fields.sendSmsButton.href = phone ? buildSmsUrl(phone, message) : "#";
+  fields.sendSmsButton.textContent = phone ? `Send SMS Alert to ${targetLabel}` : "Add Alert Phone in Settings";
+
+  const showEmail = emailEnabled;
+  fields.sendEmailButton.hidden = !showEmail;
+  fields.sendEmailButton.href = email ? buildMailtoUrl(email, "Track Mint supply expense alert", message) : "#";
+  fields.sendEmailButton.textContent = email ? `Send Email Alert to ${targetLabel}` : "Add Alert Email in Settings";
+
+  if (playSound) playAlarm();
+};
+
+// Every record currently flagged as a duplicate of at least one other bill —
+// the single source of truth for the alert banner's count, the Reports
+// "Duplicate matches" tile, AND the "Review Expense" list, so none of the
+// three can ever disagree about how many bills are involved.
+const getFlaggedDuplicateExpenses = () => state.expenses.filter((expense) => findDuplicateExpenses(expense).length > 0);
+
+const countFlaggedDuplicateExpenses = () => getFlaggedDuplicateExpenses().length;
+
+// Tracks whether the currently-active alert is the same one already shown,
+// so the alarm sound only plays when a problem is newly detected — not on
+// every re-render while it remains unresolved.
+let lastAlertSignature = null;
+
+// Recomputed on every render (including the very first one after a page
+// reload) so an unresolved alert reappears automatically instead of only
+// existing transiently right after the save that triggered it.
+const updateAlertBanner = () => {
+  const rawLimit = Number(fields.rawMaterialLimit.value || 0);
+  const rawTotal = getRawMaterialTotal();
+  const cashFlowExpense = rawLimit > 0 && rawTotal > rawLimit ? state.expenses.find(isRawMaterial) : null;
+
+  if (cashFlowExpense) {
+    const isNewAlert = lastAlertSignature !== "cashflow";
+    lastAlertSignature = "cashflow";
+    showSupplyAlert(cashFlowExpense, rawTotal, rawLimit, isNewAlert);
+    return;
+  }
+
+  const duplicateExpense = state.expenses.find((expense) => findDuplicateExpenses(expense).length > 0);
+  if (duplicateExpense) {
+    const totalFlagged = countFlaggedDuplicateExpenses();
+    lastAlertSignature = "duplicate";
+    fields.alertPanel.hidden = false;
+    fields.alertMessage.textContent = `Possible duplicate detected for ${duplicateExpense.vendor || "this supplier"}. ${totalFlagged} bill${totalFlagged === 1 ? "" : "s"} in your records ${totalFlagged === 1 ? "is" : "are"} currently flagged as duplicates.`;
+    fields.sendSmsButton.hidden = false;
+    fields.sendSmsButton.href = "#";
+    fields.sendSmsButton.textContent = "Review Expense";
+    fields.sendEmailButton.hidden = true;
+    return;
+  }
+
+  lastAlertSignature = null;
+  fields.alertPanel.hidden = true;
+};
+
+const normalizeForMatch = (value) => String(value || "").trim().toLowerCase();
+
+// Every one of these must match for two bills to count as a duplicate of
+// each other — vendor first (short-circuits the rest when it already
+// differs), then phone, date, category, material, quantity, amount, GSTIN.
+// A difference in even one field (e.g. Category) means it is NOT a duplicate.
+const findDuplicateExpenses = (expense) =>
+  state.expenses.filter((existing) => {
+    // Exclude the expense from matching itself when recomputed live over
+    // already-saved records (at save time it isn't in state.expenses yet,
+    // so this is a no-op there).
+    if (expense.id && existing.id === expense.id) return false;
+    if (normalizeForMatch(existing.vendor) !== normalizeForMatch(expense.vendor)) return false;
+    if (normalizeForMatch(existing.supplierPhone) !== normalizeForMatch(expense.supplierPhone)) return false;
+    if (existing.date !== expense.date) return false;
+    if (normalizeForMatch(existing.category) !== normalizeForMatch(expense.category)) return false;
+    if (normalizeForMatch(existing.materialItem) !== normalizeForMatch(expense.materialItem)) return false;
+    if (normalizeForMatch(existing.quantity) !== normalizeForMatch(expense.quantity)) return false;
+    if (Number(existing.amount || 0) !== Number(expense.amount || 0)) return false;
+    if (normalizeForMatch(existing.gstin) !== normalizeForMatch(expense.gstin)) return false;
+    return true;
+  });
+
+const buildAiFlags = (expense) => {
+  const duplicates = findDuplicateExpenses(expense);
+  const amount = Number(expense.amount || 0);
+  const supplierTotal = state.expenses
+    .filter((item) => normalizeForMatch(item.vendor) === normalizeForMatch(expense.vendor))
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const rawLimit = Number(fields.rawMaterialLimit.value || 0);
+  const rawTotalAfterSave = getRawMaterialTotal() + (isRawMaterial(expense) ? amount : 0);
+  return {
+    duplicate: duplicates.length > 0,
+    duplicateCount: duplicates.length,
+    anomaly: amount >= 50000 || (supplierTotal > 0 && amount > supplierTotal * 1.5),
+    cashFlowAlert: isRawMaterial(expense) && rawLimit > 0 && rawTotalAfterSave > rawLimit,
+  };
+};
+
+const describeAiFlags = (flags = {}) => ({
+  duplicate: flags.duplicate ? `${flags.duplicateCount} matching saved bill found` : "No duplicate match found",
+  anomaly: flags.anomaly ? "Unusual amount pattern detected" : "No unusual amount pattern",
+  cashFlowAlert: flags.cashFlowAlert ? "Raw material limit will be crossed" : "No cash flow limit issue",
+});
+
+const renderMetricPanels = () => {
+  const total = state.expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const gst = state.expenses.reduce((sum, expense) => sum + Number(expense.tax || 0), 0);
+  const suppliers = new Set(
+    state.expenses.filter((expense) => expense.vendor || expense.supplierPhone).map((expense) => `${expense.vendor}|${expense.supplierPhone}`)
+  );
+  fields.totalSpend.textContent = `INR ${formatMoney(total)}`;
+  fields.gstCredit.textContent = `INR ${formatMoney(gst)}`;
+  fields.rawMaterialSpend.textContent = `INR ${formatMoney(getRawMaterialTotal())}`;
+  fields.pendingCount.textContent = state.expenses.filter((expense) => expense.status === "Pending").length;
+  fields.approvedCount.textContent = state.expenses.filter((expense) => expense.status === "Approved").length;
+  fields.supplierCount.textContent = suppliers.size;
+};
+
+// Fixed hue order, validated colorblind-safe against this app's chart surfaces
+// (adjacent CVD ΔE >= 8, normal-vision floor >= 15 — see styles.css :root).
+const CATEGORY_COLOR_VARS = [
+  "var(--series-1)",
+  "var(--series-2)",
+  "var(--series-3)",
+  "var(--series-4)",
+  "var(--series-5)",
+  "var(--series-6)",
+  "var(--series-7)",
+  "var(--series-8)",
+];
+
+// Pie/donut charts read reliably only up to ~6 segments; keep the top 5 by
+// amount and fold everything past that into a single "Other" slice.
+const foldToTopSlices = (totals, maxSlices = 5) => {
+  const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  if (entries.length <= maxSlices) return entries.map(([label, value]) => ({ label, value }));
+  const top = entries.slice(0, maxSlices).map(([label, value]) => ({ label, value }));
+  const restTotal = entries.slice(maxSlices).reduce((sum, [, value]) => sum + value, 0);
+  return [...top, { label: "Other", value: restTotal }];
+};
+
+// --- Shared floating tooltip, reused by every dashboard chart ---
+const positionChartTooltip = (clientX, clientY) => {
+  const tooltip = fields.chartTooltip;
+  if (!tooltip || tooltip.hidden) return;
+  const offset = 14;
+  const rect = tooltip.getBoundingClientRect();
+  let x = clientX + offset;
+  let y = clientY + offset;
+  if (x + rect.width > window.innerWidth - 8) x = clientX - rect.width - offset;
+  if (y + rect.height > window.innerHeight - 8) y = clientY - rect.height - offset;
+  tooltip.style.left = `${Math.max(8, x)}px`;
+  tooltip.style.top = `${Math.max(8, y)}px`;
+};
+
+const showChartTooltip = (clientX, clientY, title, rows) => {
+  const tooltip = fields.chartTooltip;
+  if (!tooltip) return;
+  tooltip.innerHTML = "";
+  if (title) {
+    const titleEl = document.createElement("div");
+    titleEl.className = "chart-tooltip-title";
+    titleEl.textContent = title;
+    tooltip.appendChild(titleEl);
+  }
+  rows.forEach(({ label, value, color }) => {
+    const row = document.createElement("div");
+    row.className = "tooltip-row";
+    if (color) {
+      const key = document.createElement("span");
+      key.className = "tooltip-key";
+      key.style.background = color;
+      row.appendChild(key);
+    }
+    const labelEl = document.createElement("span");
+    labelEl.className = "tooltip-label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("strong");
+    valueEl.className = "tooltip-value";
+    valueEl.textContent = value;
+    row.appendChild(labelEl);
+    row.appendChild(valueEl);
+    tooltip.appendChild(row);
+  });
+  tooltip.hidden = false;
+  positionChartTooltip(clientX, clientY);
+};
+
+const hideChartTooltip = () => {
+  if (fields.chartTooltip) fields.chartTooltip.hidden = true;
+};
+
+const tooltipAnchorFromElement = (el) => {
+  const rect = el.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top };
+};
+
+const bindMarkTooltip = (mark, title, rows) => {
+  mark.addEventListener("pointerenter", (event) => showChartTooltip(event.clientX, event.clientY, title, rows));
+  mark.addEventListener("pointermove", (event) => positionChartTooltip(event.clientX, event.clientY));
+  mark.addEventListener("pointerleave", hideChartTooltip);
+  mark.addEventListener("focus", () => {
+    const anchor = tooltipAnchorFromElement(mark);
+    showChartTooltip(anchor.x, anchor.y, title, rows);
+  });
+  mark.addEventListener("blur", hideChartTooltip);
+};
+
+// Small worth+share KPI cards, one per item — the "how much and what share"
+// readout that supplements the donut/bar chart rather than replacing it.
+const renderMiniStatCards = (container, items) => {
+  if (!container) return;
+  container.innerHTML = "";
+  items.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "mini-stat-card";
+    card.style.setProperty("--stat-color", item.color || "var(--primary)");
+
+    const label = document.createElement("span");
+    label.className = "mini-stat-label";
+    label.textContent = item.label;
+    label.title = item.label;
+
+    const value = document.createElement("span");
+    value.className = "mini-stat-value";
+    value.textContent = `INR ${formatMoney(item.value)}`;
+
+    const percent = document.createElement("span");
+    percent.className = "mini-stat-percent";
+    percent.textContent = `${Math.round((item.share || 0) * 100)}% of total`;
+
+    card.append(label, value, percent);
+    container.appendChild(card);
+  });
+};
+
+const renderCategoryDonut = () => {
+  const totals = groupTotal(state.expenses, (expense) => expense.category);
+  const container = fields.categoryBars;
+  container.innerHTML = "";
+  if (!Object.keys(totals).length) {
+    container.innerHTML = '<p class="empty-state">No category data yet.</p>';
+    if (fields.categoryStatCards) fields.categoryStatCards.innerHTML = "";
+    return;
+  }
+
+  const slices = foldToTopSlices(totals, 5).map((slice, index) => ({
+    ...slice,
+    color: slice.label === "Other" ? "var(--series-other)" : CATEGORY_COLOR_VARS[index],
+  }));
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0) || 1;
+
+  // Canvas is bigger than the ring itself so there's room for leader-line
+  // callouts outside it — small slices can't fit a legible label inline.
+  // (300 leaves enough margin that even a worst-case callout — a slice
+  // pointing straight left/right, plus its label text — never clips the edge.)
+  const size = 300;
+  const center = size / 2;
+  const outerR = 92;
+  const innerR = 56;
+  const midR = (outerR + innerR) / 2;
+  const strokeWidth = outerR - innerR;
+  const circumference = 2 * Math.PI * midR;
+  const gapPx = 3;
+  const INLINE_LABEL_THRESHOLD = 0.08;
+
+  let cumulative = 0;
+  const segments = slices.map((slice) => {
+    const share = slice.value / total;
+    const rawLength = share * circumference;
+    const dashLength = Math.max(rawLength - gapPx, 0);
+    const dashOffset = -cumulative;
+    const midAngleDeg = ((cumulative + rawLength / 2) / circumference) * 360 - 90;
+    cumulative += rawLength;
+    const midAngleRad = (midAngleDeg * Math.PI) / 180;
+    const cos = Math.cos(midAngleRad);
+    const sin = Math.sin(midAngleRad);
+    return {
+      ...slice,
+      share,
+      dashLength,
+      dashOffset,
+      labelX: center + cos * midR,
+      labelY: center + sin * midR,
+      cos,
+      sin,
+    };
+  });
+
+  const circles = segments
+    .map(
+      (seg, index) => `
+      <circle
+        class="chart-mark" data-index="${index}"
+        cx="${center}" cy="${center}" r="${midR}"
+        fill="none" stroke="${seg.color}" stroke-width="${strokeWidth}"
+        stroke-dasharray="${seg.dashLength} ${Math.max(circumference - seg.dashLength, 0)}"
+        stroke-dashoffset="${seg.dashOffset}"
+        transform="rotate(-90 ${center} ${center})"
+        tabindex="0" role="img"
+        aria-label="${seg.label}: INR ${formatMoney(seg.value)}, ${Math.round(seg.share * 100)} percent of total spend"
+      ></circle>`
+    )
+    .join("");
+
+  // Big-enough slices get their % set directly on the ring; slices too thin
+  // for legible inline text get a leader line pointing out to the label
+  // instead — every category still shows a % somewhere on the chart itself.
+  const sliceLabels = segments
+    .filter((seg) => seg.share >= INLINE_LABEL_THRESHOLD)
+    .map(
+      (seg) =>
+        `<text class="donut-slice-label" x="${seg.labelX.toFixed(1)}" y="${seg.labelY.toFixed(1)}" text-anchor="middle" dominant-baseline="middle">${Math.round(seg.share * 100)}%</text>`
+    )
+    .join("");
+
+  const callouts = segments
+    .filter((seg) => seg.share > 0 && seg.share < INLINE_LABEL_THRESHOLD)
+    .map((seg) => {
+      const side = seg.cos >= 0 ? 1 : -1;
+      const calloutR = outerR + 18;
+      const startX = center + seg.cos * outerR;
+      const startY = center + seg.sin * outerR;
+      const endX = center + seg.cos * calloutR;
+      const endY = center + seg.sin * calloutR;
+      const textX = endX + side * 4;
+      return `
+        <line class="donut-callout-line" x1="${startX.toFixed(1)}" y1="${startY.toFixed(1)}" x2="${endX.toFixed(1)}" y2="${endY.toFixed(1)}" />
+        <text class="donut-callout-label" x="${textX.toFixed(1)}" y="${endY.toFixed(1)}" text-anchor="${side > 0 ? "start" : "end"}" dominant-baseline="middle">${Math.round(seg.share * 100)}%</text>
+      `;
+    })
+    .join("");
+
+  const svgWrap = document.createElement("div");
+  svgWrap.className = "donut-svg-wrap";
+  svgWrap.innerHTML = `
+    <svg viewBox="0 0 ${size} ${size}" role="img" aria-label="Category spend breakdown, total INR ${formatMoney(total)}">
+      ${circles}
+      ${sliceLabels}
+      ${callouts}
+      <text class="donut-center-value" x="${center}" y="${center - 6}" text-anchor="middle">INR ${formatMoney(total)}</text>
+      <text class="donut-center-label" x="${center}" y="${center + 14}" text-anchor="middle">Total Spend</text>
+    </svg>
+  `;
+
+  container.append(svgWrap);
+
+  svgWrap.querySelectorAll(".chart-mark").forEach((mark) => {
+    const seg = segments[Number(mark.dataset.index)];
+    bindMarkTooltip(mark, null, [
+      { label: seg.label, value: `INR ${formatMoney(seg.value)} (${Math.round(seg.share * 100)}%)`, color: seg.color },
+    ]);
+  });
+
+  renderMiniStatCards(fields.categoryStatCards, segments);
+};
+
+const renderRecent = () => {
+  fields.recentExpenses.innerHTML = "";
+  state.expenses.slice(0, 5).forEach((expense) => {
+    const item = document.createElement("div");
+    item.className = "mini-item";
+    item.innerHTML = `<div><strong>${expense.vendor}</strong><span>${expense.category} - ${formatDisplayDate(expense.date)}</span></div><strong>INR ${formatMoney(expense.amount)}</strong>`;
+    fields.recentExpenses.appendChild(item);
+  });
+  if (!state.expenses.length) fields.recentExpenses.innerHTML = '<p class="empty-state">No recent expenses yet.</p>';
+};
+
+// When set (via "Review Expense" on the duplicate alert), the ledger table
+// shows only this specific duplicate cluster instead of every saved bill.
+let duplicateFilterIds = null;
+
+// Kept in sync with the #status <select> options in the Scan/Add Expense form.
+const STATUS_OPTIONS = ["Pending", "Approved", "Rejected"];
+
+const renderRows = () => {
+  // Once deletions bring the cluster down to one bill (or none), there's
+  // nothing left to compare — fall back to the full list automatically.
+  if (duplicateFilterIds && state.expenses.filter((expense) => duplicateFilterIds.includes(expense.id)).length <= 1) {
+    duplicateFilterIds = null;
+  }
+
+  const visibleExpenses = duplicateFilterIds
+    ? state.expenses.filter((expense) => duplicateFilterIds.includes(expense.id))
+    : state.expenses;
+
+  if (fields.duplicateFilterNotice) {
+    fields.duplicateFilterNotice.hidden = !duplicateFilterIds;
+    if (duplicateFilterIds && fields.duplicateFilterText) {
+      fields.duplicateFilterText.textContent = `Showing ${visibleExpenses.length} bills flagged as duplicates — delete the extra entries below.`;
+    }
+  }
+
+  fields.rows.innerHTML = "";
+  visibleExpenses.forEach((expense) => {
+    const row = document.createElement("tr");
+    [expense.vendor, expense.supplierPhone || "-", formatDisplayDate(expense.date), expense.category, expense.materialItem || "-", expense.quantity || "-", `INR ${formatMoney(expense.amount)}`, expense.gstin || "-"].forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    });
+    const statusCell = document.createElement("td");
+    const statusSelect = document.createElement("select");
+    statusSelect.className = `status-select status ${expense.status}`;
+    statusSelect.dataset.statusId = expense.id;
+    STATUS_OPTIONS.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option;
+      optionEl.textContent = option;
+      optionEl.selected = option === expense.status;
+      statusSelect.appendChild(optionEl);
+    });
+    statusCell.appendChild(statusSelect);
+    row.appendChild(statusCell);
+
+    const openCell = document.createElement("td");
+    const openButton = document.createElement("button");
+    openButton.className = "open-button";
+    openButton.dataset.openId = expense.id;
+    openButton.textContent = "View";
+    openCell.appendChild(openButton);
+    row.appendChild(openCell);
+
+    const actionCell = document.createElement("td");
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "row-button";
+    deleteButton.dataset.id = expense.id;
+    deleteButton.textContent = "X";
+    actionCell.appendChild(deleteButton);
+    row.appendChild(actionCell);
+    fields.rows.appendChild(row);
+  });
+  fields.empty.hidden = visibleExpenses.length > 0;
+};
+
+const getSupplierNames = () =>
+  Array.from(new Set(state.expenses.map((expense) => expense.vendor).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+// A supplier can have many bills over time — picking a supplier from the
+// dropdown shows their most recent one as the representative record.
+const latestExpenseForVendor = (vendor) => {
+  const matches = state.expenses.filter((expense) => expense.vendor === vendor);
+  return matches.reduce((latest, expense) => (!latest || (expense.date || "") > (latest.date || "") ? expense : latest), null);
+};
+
+const populateDetailVendorSelect = (selectedVendor) => {
+  const suppliers = getSupplierNames();
+  fields.detailVendorSelect.innerHTML = "";
+  if (!suppliers.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No expense selected";
+    fields.detailVendorSelect.appendChild(option);
+    fields.detailVendorSelect.disabled = true;
+    return;
+  }
+  fields.detailVendorSelect.disabled = false;
+  suppliers.forEach((vendor) => {
+    const option = document.createElement("option");
+    option.value = vendor;
+    option.textContent = vendor;
+    fields.detailVendorSelect.appendChild(option);
+  });
+  fields.detailVendorSelect.value = suppliers.includes(selectedVendor) ? selectedVendor : suppliers[0];
+};
+
+// Monthly/yearly totals for whichever supplier is currently selected —
+// distinct from the Reports screen's business-wide monthly summary.
+const renderSupplierPeriodTotals = (vendor) => {
+  const supplierExpenses = state.expenses.filter((expense) => expense.vendor === vendor);
+  const monthly = groupTotal(supplierExpenses, (expense) => (expense.date || "").slice(0, 7));
+  const yearly = groupTotal(supplierExpenses, (expense) => (expense.date || "").slice(0, 4));
+
+  fields.detailMonthlyReport.innerHTML = "";
+  Object.entries(monthly)
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .forEach(([month, amount]) => {
+      const item = document.createElement("div");
+      item.className = "report-item";
+      item.innerHTML = `<span>${formatMonthLabel(month)}</span><strong>INR ${formatMoney(amount)}</strong>`;
+      fields.detailMonthlyReport.appendChild(item);
+    });
+  if (!Object.keys(monthly).length) fields.detailMonthlyReport.innerHTML = '<p class="empty-state">No monthly data yet.</p>';
+
+  fields.detailYearlyReport.innerHTML = "";
+  Object.entries(yearly)
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .forEach(([year, amount]) => {
+      const item = document.createElement("div");
+      item.className = "report-item";
+      item.innerHTML = `<span>${year}</span><strong>INR ${formatMoney(amount)}</strong>`;
+      fields.detailYearlyReport.appendChild(item);
+    });
+  if (!Object.keys(yearly).length) fields.detailYearlyReport.innerHTML = '<p class="empty-state">No yearly data yet.</p>';
+};
+
+const showExpenseDetails = (expense) => {
+  state.selectedExpenseId = expense ? expense.id : null;
+  populateDetailVendorSelect(expense ? expense.vendor : "");
+  if (!expense) {
+    fields.detailSummary.textContent = "Open a record from the expense list to view full details.";
+    fields.detailStatus.textContent = "Pending";
+    fields.detailStatus.className = "status Pending";
+    fields.detailGrid.innerHTML = "";
+    fields.detailMonthlyReport.innerHTML = "";
+    fields.detailYearlyReport.innerHTML = "";
+    return;
+  }
+  fields.detailSummary.textContent = `${expense.category} - INR ${formatMoney(expense.amount)} - ${formatDisplayDate(expense.date)}`;
+  fields.detailStatus.textContent = expense.status;
+  fields.detailStatus.className = `status ${expense.status}`;
+  const aiReview = describeAiFlags(buildAiFlags(expense));
+  const details = [
+    ["Supplier Phone", expense.supplierPhone || "-"],
+    ["Material Item", expense.materialItem || "-"],
+    ["Quantity", expense.quantity || "-"],
+    ["GSTIN", expense.gstin || "-"],
+    ["Tax", `INR ${formatMoney(expense.tax)}`],
+    ["AI Duplicate Check", aiReview.duplicate],
+    ["AI Pattern Check", aiReview.anomaly],
+    ["AI Cash Flow Check", aiReview.cashFlowAlert],
+    ["Notes", expense.notes || "-"],
+  ];
+  fields.detailGrid.innerHTML = "";
+  details.forEach(([label, value]) => {
+    const box = document.createElement("div");
+    box.innerHTML = `<dt>${label}</dt><dd>${value}</dd>`;
+    fields.detailGrid.appendChild(box);
+  });
+  renderSupplierPeriodTotals(expense.vendor);
+};
+
+const renderReports = () => {
+  const monthly = groupTotal(state.expenses, (expense) => (expense.date || "").slice(0, 7));
+  fields.monthlyReport.innerHTML = "";
+  Object.entries(monthly).forEach(([month, amount]) => {
+    const item = document.createElement("div");
+    item.className = "report-item";
+    item.innerHTML = `<span>${month}</span><strong>INR ${formatMoney(amount)}</strong>`;
+    fields.monthlyReport.appendChild(item);
+  });
+  if (!Object.keys(monthly).length) fields.monthlyReport.innerHTML = '<p class="empty-state">No monthly data yet.</p>';
+
+  const supplierTotals = groupTotal(state.expenses, (expense) => expense.vendor);
+  fields.supplierReport.innerHTML = "";
+  byAmount(Object.entries(supplierTotals).map(([vendor, amount]) => ({ vendor, amount }))).forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "report-item";
+    item.innerHTML = `<span>${entry.vendor}</span><strong>INR ${formatMoney(entry.amount)}</strong>`;
+    fields.supplierReport.appendChild(item);
+  });
+  if (!Object.keys(supplierTotals).length) fields.supplierReport.innerHTML = '<p class="empty-state">No supplier data yet.</p>';
+
+  if (fields.aiWorkflowReport) {
+    // Recompute live against the current data and current matching rules —
+    // expense.aiFlags is a snapshot frozen at save time and goes stale
+    // whenever new expenses arrive or the matching logic changes.
+    const liveFlags = state.expenses.map((expense) => buildAiFlags(expense));
+    const duplicateCount = countFlaggedDuplicateExpenses();
+    const anomalyCount = liveFlags.filter((flags) => flags.anomaly).length;
+    const alertCount = liveFlags.filter((flags) => flags.cashFlowAlert).length;
+    const items = [
+      ["OCR captured bills", state.expenses.length],
+      ["Duplicate matches", duplicateCount],
+      ["Pattern alerts", anomalyCount],
+      ["Cash flow alerts", alertCount],
+    ];
+    fields.aiWorkflowReport.innerHTML = "";
+    items.forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "report-item";
+      item.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+      fields.aiWorkflowReport.appendChild(item);
+    });
+  }
+};
+
+const formatChartValue = (value) => `₹${formatMoney(value)}`;
+
+const buildSeries = (grouped, order) => {
+  const labels = order || Object.keys(grouped).sort();
+  return labels.map((label) => ({ label, value: Number(grouped[label] || 0) }));
+};
+
+// Picks a "clean" axis maximum/step (1/2/5 x 10^n) so Y-axis ticks read like
+// 0 / 5,000 / 10,000 rather than an arbitrary fraction of the data's max.
+const niceAxisScale = (maxValue, tickCount = 4) => {
+  const safeMax = Math.max(maxValue, 1);
+  const roughStep = safeMax / tickCount;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
+  const residual = roughStep / magnitude;
+  let niceResidual = 10;
+  if (residual <= 1) niceResidual = 1;
+  else if (residual <= 2) niceResidual = 2;
+  else if (residual <= 5) niceResidual = 5;
+  const step = niceResidual * magnitude;
+  return { step, niceMax: step * tickCount, ticks: Array.from({ length: tickCount + 1 }, (_, i) => step * i) };
+};
+
+const truncateLabel = (label, maxChars) => (label.length > maxChars ? `${label.slice(0, Math.max(1, maxChars - 1))}…` : label);
+
+// Column with a rounded top and a square baseline (never rounded all the
+// way around — the baseline is where the bar "grows from").
+const roundedTopBarPath = (x, y, width, height, radius) => {
+  if (height <= 0) return "";
+  const r = Math.min(radius, width / 2, height);
+  if (r <= 0) return `M${x},${y} h${width} v${height} h${-width} Z`;
+  return `M${x},${y + r} a${r},${r} 0 0 1 ${r},${-r} h${width - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${height - r} h${-width} Z`;
+};
+
+const CHART_PADDING = { top: 28, right: 22, bottom: 46, left: 66 };
+
+// Bar/column chart — one series, ranked magnitude comparison (e.g. spend by
+// supplier). Y-axis carries clean-number ticks; each bar is its own hover/
+// focus target with a tooltip carrying the value the label may not fit.
+const drawBarChart = (svg, items, options = {}) => {
+  if (!svg || !items.length) return;
+  const color = options.color || "var(--primary)";
+  const width = 800;
+  const height = 320;
+  const { top, right, bottom, left } = CHART_PADDING;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const count = items.length;
+  const maxValue = Math.max(...items.map((item) => item.value), 0);
+  const { niceMax, ticks } = niceAxisScale(maxValue, 4);
+  const barWidth = Math.min(24, Math.max(14, plotWidth / count - 14));
+  const gap = count > 1 ? (plotWidth - count * barWidth) / (count - 1) : 0;
+  const slotWidth = barWidth + gap;
+  const maxChars = Math.max(6, Math.floor(slotWidth / 6.5));
+
+  const axis = ticks
+    .map((tick) => {
+      const y = top + plotHeight - (tick / niceMax) * plotHeight;
+      return `
+        <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="chart-grid-line" />
+        <text x="${left - 10}" y="${y + 4}" text-anchor="end" class="chart-axis-tick">${formatChartValue(tick)}</text>
+      `;
+    })
+    .join("");
+  const baseline = `<line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" class="chart-axis-line" />`;
+
+  const bars = items
+    .map((item, index) => {
+      const x = left + index * slotWidth;
+      const barHeight = niceMax > 0 ? (item.value / niceMax) * plotHeight : 0;
+      const y = top + plotHeight - barHeight;
+      const path = roundedTopBarPath(x, y, barWidth, barHeight, 4);
+      const valueLabel =
+        barHeight > 24
+          ? `<text x="${x + barWidth / 2}" y="${y - 8}" text-anchor="middle" class="chart-value">${formatChartValue(item.value)}</text>`
+          : "";
+      return `
+        <g>
+          <path class="chart-mark" data-index="${index}" d="${path}" fill="${color}" tabindex="0" role="img" aria-label="${item.label}: ${formatChartValue(item.value)}"></path>
+          ${valueLabel}
+          <text x="${x + barWidth / 2}" y="${height - bottom + 20}" text-anchor="middle" class="chart-label">${truncateLabel(item.label, maxChars)}</text>
+        </g>
+      `;
+    })
+    .join("");
+
+  svg.innerHTML = `${axis}${baseline}${bars}`;
+
+  svg.querySelectorAll(".chart-mark").forEach((mark) => {
+    const item = items[Number(mark.dataset.index)];
+    bindMarkTooltip(mark, item.label, [{ label: "Amount", value: formatChartValue(item.value), color }]);
+  });
+};
+
+// Line chart — a single series' trend over time. Area wash under the line,
+// clean-number Y ticks, X-axis labels thinned to whatever actually fits, and
+// a per-point hover target (bigger than the visible dot) driving a crosshair.
+const drawLineChart = (svg, items) => {
+  if (!svg || !items.length) return;
+  const width = 800;
+  const height = 320;
+  const { top, right, bottom, left } = CHART_PADDING;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const count = items.length;
+  const maxValue = Math.max(...items.map((item) => item.value), 0);
+  const { niceMax, ticks } = niceAxisScale(maxValue, 4);
+
+  const xFor = (index) => (count <= 1 ? left + plotWidth / 2 : left + (index / (count - 1)) * plotWidth);
+  const yFor = (value) => top + plotHeight - (niceMax > 0 ? (value / niceMax) * plotHeight : 0);
+
+  const axis = ticks
+    .map((tick) => {
+      const y = yFor(tick);
+      return `
+        <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="chart-grid-line" />
+        <text x="${left - 10}" y="${y + 4}" text-anchor="end" class="chart-axis-tick">${formatChartValue(tick)}</text>
+      `;
+    })
+    .join("");
+  const baseline = `<line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" class="chart-axis-line" />`;
+
+  // However many points there are, never show more X labels than fit without colliding.
+  const maxLabels = Math.max(2, Math.floor(plotWidth / 70));
+  const labelStep = Math.max(1, Math.ceil(count / maxLabels));
+  const xLabels = items
+    .map((item, index) => {
+      if (index % labelStep !== 0 && index !== count - 1) return "";
+      return `<text x="${xFor(index).toFixed(1)}" y="${height - bottom + 20}" text-anchor="middle" class="chart-label">${item.label}</text>`;
+    })
+    .join("");
+
+  const points = items.map((item, index) => ({ ...item, x: xFor(index), y: yFor(item.value) }));
+  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const areaPath =
+    count > 1
+      ? `${linePath} L${points[count - 1].x.toFixed(1)},${(top + plotHeight).toFixed(1)} L${points[0].x.toFixed(1)},${(top + plotHeight).toFixed(1)} Z`
+      : "";
+
+  const dots = points
+    .map(
+      (p, index) => `
+      <circle class="chart-dot" data-index="${index}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4"></circle>
+      <circle class="chart-hit-target chart-mark" data-index="${index}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="14" tabindex="0" role="img" aria-label="${p.label}: ${formatChartValue(p.value)}"></circle>
+    `
+    )
+    .join("");
+
+  const lastPoint = points[count - 1];
+  const endLabel = `<text x="${lastPoint.x.toFixed(1)}" y="${(lastPoint.y - 12).toFixed(1)}" text-anchor="${count > 1 ? "end" : "middle"}" class="chart-value">${formatChartValue(lastPoint.value)}</text>`;
+
+  svg.innerHTML = `
+    ${axis}
+    ${baseline}
+    ${xLabels}
+    <line class="chart-crosshair" id="${svg.id}Crosshair" x1="0" y1="${top}" x2="0" y2="${top + plotHeight}" style="opacity:0"></line>
+    ${areaPath ? `<path d="${areaPath}" fill="var(--primary)" opacity="0.1"></path>` : ""}
+    ${count > 1 ? `<path d="${linePath}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>` : ""}
+    ${dots}
+    ${endLabel}
+  `;
+
+  const crosshair = svg.querySelector(`#${svg.id}Crosshair`);
+  svg.querySelectorAll(".chart-hit-target").forEach((hit) => {
+    const point = points[Number(hit.dataset.index)];
+    const dot = svg.querySelector(`.chart-dot[data-index="${hit.dataset.index}"]`);
+    const activate = (clientX, clientY) => {
+      if (crosshair) {
+        crosshair.setAttribute("x1", point.x);
+        crosshair.setAttribute("x2", point.x);
+        crosshair.style.opacity = "1";
+      }
+      if (dot) dot.classList.add("chart-dot-hover");
+      showChartTooltip(clientX, clientY, point.label, [{ label: "Spend", value: formatChartValue(point.value), color: "var(--primary)" }]);
+    };
+    const deactivate = () => {
+      if (crosshair) crosshair.style.opacity = "0";
+      if (dot) dot.classList.remove("chart-dot-hover");
+      hideChartTooltip();
+    };
+    hit.addEventListener("pointerenter", (event) => activate(event.clientX, event.clientY));
+    hit.addEventListener("pointermove", (event) => positionChartTooltip(event.clientX, event.clientY));
+    hit.addEventListener("pointerleave", deactivate);
+    hit.addEventListener("focus", () => {
+      const anchor = tooltipAnchorFromElement(hit);
+      activate(anchor.x, anchor.y);
+    });
+    hit.addEventListener("blur", deactivate);
+  });
+};
+
+const groupByPeriod = (period) => {
+  const data = {};
+  const todayDate = new Date();
+  const labels = new Set();
+  state.expenses.forEach((expense) => {
+    if (!expense.date) return;
+    const date = new Date(expense.date);
+    if (Number.isNaN(date.getTime())) return;
+    let key;
+    if (period === "daily") {
+      key = date.toISOString().slice(0, 10);
+    } else if (period === "monthly") {
+      key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    } else if (period === "yearly") {
+      key = `${date.getFullYear()}`;
+    } else {
+      key = `${date.getFullYear()}`;
+    }
+    labels.add(key);
+    data[key] = (data[key] || 0) + Number(expense.amount || 0);
+  });
+  const ordered = Array.from(labels).sort();
+  // Sort chronologically on the ISO key first, then convert only the display label,
+  // so daily/monthly points read as real dates/months without breaking the ordering
+  // (and a month from one year never collides with the same month in another).
+  if (period === "daily") {
+    return ordered.map((key) => ({ label: formatDisplayDate(key), value: Number(data[key] || 0) }));
+  }
+  if (period === "monthly") {
+    return ordered.map((key) => ({ label: formatMonthLabel(key), value: Number(data[key] || 0) }));
+  }
+  return buildSeries(data, ordered);
+};
+
+const renderTrendChart = () => {
+  if (!fields.trendChart) return;
+  const series = groupByPeriod(state.chartPeriod || "monthly");
+  if (!series.length) {
+    fields.trendChart.innerHTML = `<text x="50%" y="50%" text-anchor="middle" class="chart-value">No expense data available</text>`;
+    return;
+  }
+  drawLineChart(fields.trendChart, series);
+};
+
+const renderSupplierChart = () => {
+  if (!fields.supplierChart) return;
+  const totals = groupTotal(state.expenses, (expense) => expense.vendor || "Unknown");
+  // Cards report each supplier's share of the business's total spend, not just
+  // share of the top 8 shown on the chart — the two totals shouldn't diverge.
+  const grandTotal = Object.values(totals).reduce((sum, value) => sum + value, 0) || 1;
+  const items = buildSeries(totals, Object.entries(totals)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 8)
+    .map(([label]) => label));
+  if (!items.length) {
+    fields.supplierChart.innerHTML = `<text x="50%" y="50%" text-anchor="middle" class="chart-value">No supplier data available</text>`;
+    if (fields.supplierStatCards) fields.supplierStatCards.innerHTML = "";
+    return;
+  }
+  drawBarChart(fields.supplierChart, items, { color: "var(--accent)" });
+  renderMiniStatCards(
+    fields.supplierStatCards,
+    items.map((item) => ({ ...item, share: item.value / grandTotal, color: "var(--accent)" }))
+  );
+};
+
+const render = () => {
+  renderMetricPanels();
+  renderCategoryDonut();
+  renderRecent();
+  renderTrendChart();
+  renderSupplierChart();
+  renderRows();
+  renderReports();
+  updateAlertBanner();
+  const selected = state.expenses.find((expense) => expense.id === state.selectedExpenseId) || state.expenses[0];
+  showExpenseDetails(selected || null);
+};
+
+const loadProfileFields = () => {
+  fields.profileName.value = state.profile.name || state.user?.name || "";
+  fields.profileEmail.value = state.profile.email || state.user?.email || "";
+  fields.businessName.value = state.profile.businessName || "";
+  fields.businessPhone.value = state.profile.businessPhone || "";
+  fields.businessGstin.value = state.profile.businessGstin || "";
+  fields.userRole.value = state.profile.userRole || "";
+};
+
+const loadSettingsFields = () => {
+  fields.rawMaterialLimit.value = state.settings.rawMaterialLimit || "";
+  fields.alertPhone.value = state.settings.alertPhone || "";
+  fields.alertEmail.value = state.settings.alertEmail || "";
+  fields.alertViaSms.checked = state.settings.alertViaSms !== false;
+  fields.alertViaEmail.checked = !!state.settings.alertViaEmail;
+  fields.alarmEnabled.checked = state.settings.alarmEnabled !== false;
+  applySettingsAccess();
+};
+
+fields.authForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const email = fields.authEmail.value.trim().toLowerCase();
+  const password = fields.authPassword.value;
+  const name = fields.authName.value.trim() || "Track Mint User";
+
+  if (!email || !password) {
+    alert("Email and password are required.");
+    return;
+  }
+  if (password.length < 4) {
+    alert("Password must be at least 4 characters.");
+    return;
+  }
+
+  // Determine mode from global variable or button state
+  const isRegisterMode = window.currentAuthMode === 'register' || document.querySelector('[data-auth-mode="register"]')?.classList.contains('active');
+
+  const accounts = loadAccounts();
+  const existing = accounts[email];
+
+  if (isRegisterMode) {
+    if (existing) {
+      alert("An account with that email already exists. Please login or use a different email.");
+      return;
+    }
+    // The first account ever created on this device becomes the Owner.
+    const isFirstAccount = Object.keys(accounts).length === 0;
+    accounts[email] = { name, email, password, isOwner: isFirstAccount };
+    saveAccounts(accounts);
+    state.user = { name, email, isOwner: isFirstAccount };
+  } else {
+    if (!existing || existing.password !== password) {
+      alert("Login failed. Please check your email and password.");
+      return;
+    }
+    // Accounts created before Owner-controlled settings existed have no isOwner
+    // flag. Grandfather in whoever logs in first, so nobody gets locked out.
+    const noOwnerYet = !Object.values(accounts).some((account) => account.isOwner);
+    if (noOwnerYet) {
+      existing.isOwner = true;
+      accounts[email] = existing;
+      saveAccounts(accounts);
+    }
+    state.user = { name: existing.name || name, email, isOwner: !!existing.isOwner };
+  }
+
+  localStorage.setItem(authKey, JSON.stringify(state.user));
+  state.profile = { ...state.profile, name: state.user.name, email: state.user.email };
+  saveProfile();
+  showApp();
+});
+
+fields.authModeButtons.forEach((button) => button.addEventListener("click", () => setAuthMode(button.dataset.authMode)));
+fields.navButtons.forEach((button) => button.addEventListener("click", () => setScreen(button.dataset.screen)));
+fields.quickScanButton.addEventListener("click", () => setScreen("scan"));
+fields.logoutButton.addEventListener("click", () => {
+  localStorage.removeItem(authKey);
+  state.user = null;
+  showAuth();
+});
+
+
+document.getElementById("extractButton").addEventListener("click", extractDetails);
+fields.scanOcrButton.addEventListener("click", runImageOcr);
+
+document.getElementById("sampleButton").addEventListener("click", () => {
+  fields.ocrText.value = `Sharma Steel Traders
+Invoice No RM-2048
+Date 09/06/2026
+GSTIN 27ABCDE1234F1Z5
+Material Steel sheets
+Quantity 50 kg
+Amount INR 15000
+CGST INR 1350
+SGST INR 1350`;
+  extractDetails();
+});
+
+// Live camera capture — an alternative to picking an existing file. Feeds the
+// captured frame into the SAME #billImage input (via DataTransfer + a
+// dispatched "change" event) so every downstream handler — preview, OCR —
+// works unmodified regardless of which path the image came from.
+let cameraStream = null;
+
+const stopCameraStream = () => {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+  }
+  fields.cameraVideo.srcObject = null;
+  fields.cameraModal.hidden = true;
+};
+
+const openCameraModal = async () => {
+  fields.cameraError.hidden = true;
+  fields.cameraError.textContent = "";
+  fields.cameraModal.hidden = false;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    fields.cameraError.textContent = "Camera capture needs a secure connection (HTTPS or localhost) — it won't work when this page is opened directly from a file:// path. Upload a photo instead.";
+    fields.cameraError.hidden = false;
+    return;
+  }
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    fields.cameraVideo.srcObject = cameraStream;
+  } catch (error) {
+    console.warn("Camera access failed:", error);
+    fields.cameraError.textContent = "Camera access was denied or unavailable. Allow camera permission for this site in your browser settings, or upload a photo instead.";
+    fields.cameraError.hidden = false;
+  }
+};
+
+const captureCameraPhoto = () => {
+  if (!cameraStream) return;
+  const video = fields.cameraVideo;
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const file = new File([blob], `bill-capture-${Date.now()}.png`, { type: "image/png" });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    fields.image.files = dataTransfer.files;
+    fields.image.dispatchEvent(new Event("change", { bubbles: true }));
+    stopCameraStream();
+  }, "image/png");
+};
+
+fields.takePhotoButton.addEventListener("click", openCameraModal);
+fields.closeCameraButton.addEventListener("click", stopCameraStream);
+fields.capturePhotoButton.addEventListener("click", captureCameraPhoto);
+
+fields.image.addEventListener("change", async () => {
+  const file = fields.image.files[0];
+  if (!file) return;
+  fields.ocrText.value = "";
+  fields.ocrProgress.hidden = true;
+  fields.ocrProgressBar.style.width = "0";
+  fields.ocrStatus.textContent = "Ready to scan";
+  fields.dropText.hidden = true;
+  if (file.type.startsWith("image/")) {
+    fields.preview.src = URL.createObjectURL(file);
+    fields.preview.hidden = false;
+    return;
+  }
+  fields.preview.hidden = true;
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    fields.ocrStatus.textContent = "PDF selected. Click OCR to extract text.";
+    return;
+  }
+  if (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt")) {
+    fields.ocrStatus.textContent = "Text file selected. Click OCR to parse supplier details.";
+    return;
+  }
+  fields.ocrStatus.textContent = "Unsupported file type. Use JPG, PNG, PDF, or TXT.";
+});
+
+document.getElementById("expenseForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const expense = {
+    id: crypto.randomUUID(),
+    vendor: fields.vendor.value.trim(),
+    supplierPhone: fields.supplierPhone.value.trim(),
+    date: fields.date.value,
+    category: fields.category.value,
+    amount: Number(fields.amount.value || 0),
+    gstin: fields.gstin.value.trim().toUpperCase(),
+    tax: Number(fields.tax.value || 0),
+    materialItem: fields.materialItem.value.trim(),
+    quantity: fields.quantity.value.trim(),
+    notes: fields.notes.value.trim(),
+    status: fields.status.value,
+  };
+  expense.aiFlags = buildAiFlags(expense);
+  state.expenses.unshift(expense);
+  saveExpenses();
+  render(); // also runs updateAlertBanner(), which shows any unresolved alert live
+  event.target.reset();
+  if (!expense.date) {
+    fields.date.value = today();
+  }
+  setWorkflowStage(expense.aiFlags.cashFlowAlert ? "alerts" : "duplicates");
+  setScreen("expenses");
+});
+
+fields.detailVendorSelect.addEventListener("change", () => {
+  const vendor = fields.detailVendorSelect.value;
+  showExpenseDetails(latestExpenseForVendor(vendor) || null);
+});
+
+fields.rows.addEventListener("click", (event) => {
+  const openButton = event.target.closest("button[data-open-id]");
+  const deleteButton = event.target.closest("button[data-id]");
+  if (openButton) {
+    const expense = state.expenses.find((item) => item.id === openButton.dataset.openId);
+    showExpenseDetails(expense);
+    setScreen("details");
+  }
+  if (deleteButton) {
+    state.expenses = state.expenses.filter((expense) => expense.id !== deleteButton.dataset.id);
+    saveExpenses();
+    render(); // re-evaluates the alert banner live — it only clears once the underlying issue is actually gone
+  }
+});
+
+// Each row's status dropdown is independent — changing one bill's status
+// (per supplier/row) never touches any other row.
+fields.rows.addEventListener("change", (event) => {
+  const statusSelect = event.target.closest("select[data-status-id]");
+  if (!statusSelect) return;
+  const expense = state.expenses.find((item) => item.id === statusSelect.dataset.statusId);
+  if (!expense) return;
+  expense.status = statusSelect.value;
+  saveExpenses();
+  render();
+});
+
+fields.sendSmsButton.addEventListener("click", (event) => {
+  if (fields.sendSmsButton.getAttribute("href") === "#") {
+    event.preventDefault();
+    if (fields.sendSmsButton.textContent === "Review Expense") {
+      // The complete flagged set — same definition as the alert's count and
+      // the Reports tile — so however many the alert says, that many rows show up here.
+      duplicateFilterIds = getFlaggedDuplicateExpenses().map((expense) => expense.id);
+      setScreen("expenses");
+      render();
+      return;
+    }
+    setScreen("settings");
+    if (isOwner()) fields.alertPhone.focus();
+  }
+});
+
+fields.clearDuplicateFilterButton?.addEventListener("click", () => {
+  duplicateFilterIds = null;
+  renderRows();
+});
+
+fields.sendEmailButton.addEventListener("click", (event) => {
+  if (fields.sendEmailButton.getAttribute("href") === "#") {
+    event.preventDefault();
+    setScreen("settings");
+    if (isOwner()) fields.alertEmail.focus();
+  }
+});
+
+document.getElementById("clearButton").addEventListener("click", () => {
+  if (!state.expenses.length || !confirm("Clear all saved expenses?")) return;
+  state.expenses = [];
+  saveExpenses();
+  render();
+});
+
+fields.periodButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    fields.periodButtons.forEach((btn) => btn.classList.toggle("active", btn === button));
+    state.chartPeriod = button.dataset.period;
+    renderTrendChart();
+  });
+});
+
+document.getElementById("exportCsvButton").addEventListener("click", () => {
+  const columns = [
+    ["Vendor", "vendor"],
+    ["Supplier Phone", "supplierPhone"],
+    ["Date", "date"],
+    ["Category", "category"],
+    ["Material Item", "materialItem"],
+    ["Quantity", "quantity"],
+    ["Amount", "amount"],
+    ["GSTIN", "gstin"],
+    ["Tax", "tax"],
+    ["Status", "status"],
+    ["Notes", "notes"],
+  ];
+  const headers = columns.map(([header]) => header);
+  const rows = state.expenses.map((expense) =>
+    columns
+      .map(([, key]) => {
+        const value = key === "date" ? formatDisplayDate(expense.date) : expense[key];
+        return `"${String(value || "").replaceAll('"', '""')}"`;
+      })
+      .join(",")
+  );
+  const blob = new Blob([[headers.join(","), ...rows].join("\n")], { type: "text/csv" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "track-mint-expenses.csv";
+  link.click();
+});
+
+fields.profileForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.profile = {
+    name: fields.profileName.value.trim(),
+    email: fields.profileEmail.value.trim(),
+    businessName: fields.businessName.value.trim(),
+    businessPhone: fields.businessPhone.value.trim(),
+    businessGstin: fields.businessGstin.value.trim().toUpperCase(),
+    userRole: fields.userRole.value.trim(),
+  };
+  saveProfile();
+  alert("Profile saved.");
+});
+
+fields.settingsForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!isOwner()) {
+    alert("Only the account owner can change alert settings.");
+    return;
+  }
+  saveSettings();
+  alert("Settings saved.");
+});
+
+[fields.rawMaterialLimit, fields.alertPhone, fields.alertEmail, fields.alertViaSms, fields.alertViaEmail, fields.alarmEnabled].forEach((field) => {
+  field.addEventListener("change", saveSettings);
+});
+
+window.addEventListener("hashchange", () => {
+  const screen = location.hash.replace("#", "");
+  if (screen && document.getElementById(`${screen}Screen`)) setScreen(screen);
+});
+
+fields.date.value = today();
+state.chartPeriod = "monthly";
+applyTheme(getPreferredTheme());
+if (fields.themeToggle) {
+  fields.themeToggle.addEventListener("click", () => {
+    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(nextTheme);
+  });
+}
+// Offline support: a service worker caches the app shell and every CDN
+// script/asset (Tesseract.js, pdf.js, and the WASM/traineddata Tesseract.js
+// itself fetches at runtime) the first time they're used online, so the app
+// keeps working — including OCR — without a connection afterward. Service
+// workers require a secure context (HTTPS or localhost); registration is a
+// silent no-op failure when the page is opened directly via file://, which
+// is why the badge below only ever reflects actual network status, not
+// whether offline support is active.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((error) => {
+      console.warn("Service worker registration failed (offline support unavailable):", error);
+    });
+  });
+}
+
+const updateOfflineBadge = () => {
+  if (fields.offlineBadge) fields.offlineBadge.hidden = navigator.onLine;
+};
+window.addEventListener("online", updateOfflineBadge);
+window.addEventListener("offline", updateOfflineBadge);
+updateOfflineBadge();
+
+setAuthMode("login");
+if (state.user) {
+  // Re-sync the Owner flag from the accounts store in case a session cached
+  // before this feature existed, or before an owner had been assigned yet.
+  const accounts = loadAccounts();
+  const storedAccount = accounts[state.user.email];
+  if (storedAccount) {
+    if (!Object.values(accounts).some((account) => account.isOwner)) {
+      storedAccount.isOwner = true;
+      accounts[state.user.email] = storedAccount;
+      saveAccounts(accounts);
+    }
+    state.user.isOwner = !!storedAccount.isOwner;
+    localStorage.setItem(authKey, JSON.stringify(state.user));
+  }
+  showApp();
+} else {
+  showAuth();
+}

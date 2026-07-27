@@ -1,0 +1,22 @@
+# Bundled test tooling (large, not part of the deployed app)
+/tools/
+
+# Separate, unrelated project
+/expense-management-app/
+expense-management-app.zip
+
+# Misc legacy/unrelated files not part of the live static app
+/docx_src/
+/__pycache__/
+MSME Scan Spend Summary.docx
+msme_scan_spend_download.html
+package.json
+server.js
+server.py
+requirements.txt
+refresh_zip.py
+README_PROXY.md
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
