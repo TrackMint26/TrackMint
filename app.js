@@ -6,6 +6,7 @@ const accountsKey = "scanspend-accounts";
 const legacyStorageKey = "msme-expense-scanner-expenses";
 const legacySettingsKey = "msme-expense-scanner-settings";
 const themeKey = "scanspend-theme";
+const paymentsKey = "track-mint-payments";
 
 const readJson = (key, fallback) => JSON.parse(localStorage.getItem(key) || fallback);
 const saveJson = (key, value) => localStorage.setItem(key, JSON.stringify(value));
@@ -19,6 +20,7 @@ const findAccountByEmail = (email) => {
 
 const state = {
   expenses: readJson(storageKey, localStorage.getItem(legacyStorageKey) || "[]"),
+  payments: readJson(paymentsKey, "[]"),
   settings: readJson(settingsKey, localStorage.getItem(legacySettingsKey) || "{}"),
   profile: readJson(profileKey, "{}"),
   user: readJson(authKey, "null"),
@@ -103,6 +105,20 @@ const fields = {
   detailGrid: document.getElementById("detailGrid"),
   detailMonthlyReport: document.getElementById("detailMonthlyReport"),
   detailYearlyReport: document.getElementById("detailYearlyReport"),
+  paymentForm: document.getElementById("paymentForm"),
+  paymentExpense: document.getElementById("paymentExpense"),
+  paymentMethod: document.getElementById("paymentMethod"),
+  paymentAmount: document.getElementById("paymentAmount"),
+  paymentDate: document.getElementById("paymentDate"),
+  paymentReference: document.getElementById("paymentReference"),
+  paymentNotes: document.getElementById("paymentNotes"),
+  upiPaySection: document.getElementById("upiPaySection"),
+  paymentUpiVpa: document.getElementById("paymentUpiVpa"),
+  generateUpiButton: document.getElementById("generateUpiButton"),
+  upiQrContainer: document.getElementById("upiQrContainer"),
+  upiQrCode: document.getElementById("upiQrCode"),
+  upiPayLink: document.getElementById("upiPayLink"),
+  paymentHistory: document.getElementById("paymentHistory"),
   monthlyReport: document.getElementById("monthlyReport"),
   supplierReport: document.getElementById("supplierReport"),
   aiWorkflowReport: document.getElementById("aiWorkflowReport"),
@@ -155,6 +171,7 @@ const formatMonthLabel = (isoMonth) => {
 };
 
 const saveExpenses = () => localStorage.setItem(storageKey, JSON.stringify(state.expenses));
+const savePayments = () => localStorage.setItem(paymentsKey, JSON.stringify(state.payments));
 const saveProfile = () => localStorage.setItem(profileKey, JSON.stringify(state.profile));
 const saveSettings = () => {
   if (!isOwner()) return;
@@ -229,6 +246,7 @@ const workflowStageByScreen = {
   scan: "capture",
   expenses: "duplicates",
   details: "duplicates",
+  payments: "duplicates",
   reports: "analytics",
   profile: "capture",
   settings: "alerts",
@@ -1776,6 +1794,104 @@ const showExpenseDetails = (expense) => {
   renderSupplierPeriodTotals(expense.vendor);
 };
 
+// Payments — deliberately scoped to what a static, backend-less, unlicensed
+// site can safely and legally do. Track Mint is NOT a payment aggregator and
+// never will be from the browser alone: real card/bank-transfer processing
+// needs an RBI-authorized Payment Aggregator, PCI-DSS handling for card data,
+// and a backend — none of which exist here, and none of which should be
+// faked. What IS safe and standard: (1) UPI's `upi://pay` deep-link/QR
+// scheme, which simply hands off to the payer's own bank-linked UPI app —
+// the app never touches the money or a PIN; (2) recording a REFERENCE for
+// any method (UPI txn ID, bank UTR, cheque number, card auth code) for the
+// user's own bookkeeping — never a card number, CVV, or bank login.
+const getPaymentsForExpense = (expenseId) => state.payments.filter((payment) => payment.expenseId === expenseId);
+
+const getPaidTotalForExpense = (expenseId) =>
+  getPaymentsForExpense(expenseId).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+const populatePaymentExpenseSelect = () => {
+  if (!fields.paymentExpense) return;
+  const previousValue = fields.paymentExpense.value;
+  fields.paymentExpense.innerHTML = '<option value="">Select an expense</option>';
+  [...state.expenses]
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+    .forEach((expense) => {
+      const paid = getPaidTotalForExpense(expense.id);
+      const paidNote = paid > 0 ? ` (Paid INR ${formatMoney(paid)})` : "";
+      const option = document.createElement("option");
+      option.value = expense.id;
+      option.textContent = `${expense.vendor || "Unknown"} - INR ${formatMoney(expense.amount)} - ${formatDisplayDate(expense.date)}${paidNote}`;
+      fields.paymentExpense.appendChild(option);
+    });
+  if ([...fields.paymentExpense.options].some((option) => option.value === previousValue)) {
+    fields.paymentExpense.value = previousValue;
+  }
+};
+
+// Standard UPI deep-link scheme (supported by every UPI app — PhonePe,
+// Google Pay, Paytm, BHIM, bank apps, etc.). Building this link/QR requires
+// no license: the payer's own UPI app performs the actual transfer, Track
+// Mint only assembles the request URL from public, non-sensitive fields.
+const buildUpiLink = ({ vpa, payeeName, amount, note }) => {
+  const params = new URLSearchParams({
+    pa: vpa,
+    pn: payeeName || "Supplier",
+    am: Number(amount || 0).toFixed(2),
+    cu: "INR",
+  });
+  if (note) params.set("tn", note.slice(0, 50));
+  return `upi://pay?${params.toString()}`;
+};
+
+const updateUpiSectionVisibility = () => {
+  if (!fields.upiPaySection) return;
+  const isUpi = fields.paymentMethod.value === "UPI";
+  fields.upiPaySection.hidden = !isUpi;
+  if (!isUpi) fields.upiQrContainer.hidden = true;
+};
+
+const generateUpiPayRequest = () => {
+  const vpa = fields.paymentUpiVpa.value.trim();
+  const amount = Number(fields.paymentAmount.value || 0);
+  if (!vpa || !vpa.includes("@")) {
+    alert("Enter the supplier's UPI ID (e.g. vendor@bank) first.");
+    return;
+  }
+  if (!amount) {
+    alert("Enter the amount to pay first.");
+    return;
+  }
+  const expense = state.expenses.find((item) => item.id === fields.paymentExpense.value);
+  const link = buildUpiLink({
+    vpa,
+    payeeName: expense ? expense.vendor : "Supplier",
+    amount,
+    note: expense ? `${expense.category} - Track Mint` : "Track Mint payment",
+  });
+  fields.upiQrCode.innerHTML = "";
+  if (window.QRCode) {
+    // eslint-disable-next-line no-new
+    new QRCode(fields.upiQrCode, { text: link, width: 176, height: 176, correctLevel: QRCode.CorrectLevel.M });
+  }
+  fields.upiPayLink.href = link;
+  fields.upiQrContainer.hidden = false;
+};
+
+const renderPaymentHistory = () => {
+  if (!fields.paymentHistory) return;
+  fields.paymentHistory.innerHTML = "";
+  const sorted = [...state.payments].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  sorted.forEach((payment) => {
+    const expense = state.expenses.find((item) => item.id === payment.expenseId);
+    const item = document.createElement("div");
+    item.className = "report-item";
+    const label = `${expense ? expense.vendor : "Unknown expense"} - ${payment.method}${payment.reference ? ` (${payment.reference})` : ""}`;
+    item.innerHTML = `<span>${label}<br /><small>${formatDisplayDate(payment.date)}</small></span><strong>INR ${formatMoney(payment.amount)}</strong>`;
+    fields.paymentHistory.appendChild(item);
+  });
+  if (!sorted.length) fields.paymentHistory.innerHTML = '<p class="empty-state">No payments recorded yet.</p>';
+};
+
 // Free, local, rule-based "AI recommendations" — every insight here is
 // computed directly from state.expenses in the browser: no API key, no
 // network call, no cloud model. Kept distinct from the NER model above
@@ -2214,6 +2330,8 @@ const render = () => {
   renderSupplierChart();
   renderRows();
   renderReports();
+  populatePaymentExpenseSelect();
+  renderPaymentHistory();
   updateAlertBanner();
   const selected = state.expenses.find((expense) => expense.id === state.selectedExpenseId) || state.expenses[0];
   showExpenseDetails(selected || null);
@@ -2431,6 +2549,33 @@ fields.detailVendorSelect.addEventListener("change", () => {
   showExpenseDetails(latestExpenseForVendor(vendor) || null);
 });
 
+fields.paymentMethod.addEventListener("change", updateUpiSectionVisibility);
+fields.generateUpiButton.addEventListener("click", generateUpiPayRequest);
+
+fields.paymentForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!fields.paymentExpense.value) {
+    alert("Select which expense this payment is for.");
+    return;
+  }
+  const payment = {
+    id: crypto.randomUUID(),
+    expenseId: fields.paymentExpense.value,
+    method: fields.paymentMethod.value,
+    amount: Number(fields.paymentAmount.value || 0),
+    date: fields.paymentDate.value || today(),
+    reference: fields.paymentReference.value.trim(),
+    notes: fields.paymentNotes.value.trim(),
+  };
+  state.payments.unshift(payment);
+  savePayments();
+  populatePaymentExpenseSelect();
+  renderPaymentHistory();
+  event.target.reset();
+  fields.paymentDate.value = today();
+  updateUpiSectionVisibility();
+});
+
 fields.rows.addEventListener("click", (event) => {
   const openButton = event.target.closest("button[data-open-id]");
   const deleteButton = event.target.closest("button[data-id]");
@@ -2566,6 +2711,8 @@ window.addEventListener("hashchange", () => {
 });
 
 fields.date.value = today();
+fields.paymentDate.value = today();
+updateUpiSectionVisibility();
 state.chartPeriod = "monthly";
 applyTheme(getPreferredTheme());
 if (fields.themeToggle) {

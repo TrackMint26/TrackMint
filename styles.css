@@ -1273,6 +1273,35 @@ th {
   color: var(--accent);
 }
 
+.upi-pay-section {
+  display: grid;
+  gap: 12px;
+  margin: 4px 0 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.upi-qr-container {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding-top: 6px;
+  text-align: center;
+}
+
+.upi-qr-container > div {
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.upi-pay-link {
+  font-weight: 800;
+  color: var(--primary);
+}
+
 .row-button,
 .open-button {
   min-width: 34px;

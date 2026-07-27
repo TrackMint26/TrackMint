@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="app-icon.png" />
-    <link rel="stylesheet" href="styles.css?v=15" />
+    <link rel="stylesheet" href="styles.css?v=16" />
   </head>
   <body>
     <div class="app-frame">
@@ -26,6 +26,7 @@
           <button data-screen="scan">Scan Receipt</button>
           <button data-screen="expenses">Expense List</button>
           <button data-screen="details">Expense Details</button>
+          <button data-screen="payments">Payments</button>
           <button data-screen="reports">Reports</button>
           <button data-screen="profile">User Profile</button>
           <button data-screen="settings">Settings</button>
@@ -335,6 +336,75 @@
             </section>
           </section>
 
+          <section class="screen" id="paymentsScreen" data-title="Payments" data-eyebrow="Settle supplier bills">
+            <div class="workspace">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Record a Payment</h2>
+                    <p>Log how a bill was settled. Track Mint never collects card numbers, CVVs, or bank credentials — for UPI it hands off to your own UPI app to complete the transfer; for every other method it only records a reference for your books, the same way a paper ledger would.</p>
+                  </div>
+                </div>
+                <form id="paymentForm">
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Expense</span>
+                      <select id="paymentExpense" required>
+                        <option value="">Select an expense</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Payment Method</span>
+                      <select id="paymentMethod">
+                        <option value="UPI">UPI</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                        <option value="Card">Card</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Cheque">Cheque</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Amount Paid (INR)</span>
+                      <input id="paymentAmount" type="number" min="0" step="0.01" required />
+                    </label>
+                    <label class="field">
+                      <span>Date</span>
+                      <input id="paymentDate" type="date" required />
+                    </label>
+                    <label class="field">
+                      <span>Reference / Transaction ID</span>
+                      <input id="paymentReference" placeholder="UPI txn ID, bank UTR, cheque no." />
+                    </label>
+                    <label class="field">
+                      <span>Notes</span>
+                      <input id="paymentNotes" placeholder="Optional" />
+                    </label>
+                  </div>
+
+                  <div id="upiPaySection" class="upi-pay-section" hidden>
+                    <label class="field">
+                      <span>Supplier UPI ID (VPA)</span>
+                      <input id="paymentUpiVpa" placeholder="vendor@bank" />
+                    </label>
+                    <button type="button" class="secondary" id="generateUpiButton">Generate UPI QR / Pay Link</button>
+                    <div id="upiQrContainer" class="upi-qr-container" hidden>
+                      <div id="upiQrCode"></div>
+                      <a id="upiPayLink" class="upi-pay-link" href="#" target="_blank" rel="noopener">Open in UPI App</a>
+                      <p class="hint-text">Scan with any UPI app, or tap the link on a phone, to complete the transfer in your own app. Track Mint never sees your UPI PIN or the money itself.</p>
+                    </div>
+                  </div>
+
+                  <button class="primary" type="submit">Save Payment</button>
+                </form>
+              </section>
+
+              <section class="panel">
+                <h2>Payment History</h2>
+                <div id="paymentHistory" class="report-list"></div>
+              </section>
+            </div>
+          </section>
+
           <section class="screen" id="reportsScreen" data-title="Reports & Analytics" data-eyebrow="Insights">
             <div class="dashboard-grid">
               <section class="panel">
@@ -419,11 +489,12 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script>
       // Track auth mode globally
       window.currentAuthMode = 'login';
     </script>
-    <script src="app.js?v=21"></script>
+    <script src="app.js?v=22"></script>
     <script>
       // Ensure auth mode buttons work
       document.addEventListener('DOMContentLoaded', function() {
