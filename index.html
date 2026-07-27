@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="app-icon.png" />
-    <link rel="stylesheet" href="styles.css?v=13" />
+    <link rel="stylesheet" href="styles.css?v=14" />
   </head>
   <body>
     <div class="app-frame">
@@ -205,6 +205,8 @@
                   <p id="ocrStatus">Ready to scan</p>
                 </div>
 
+                <p class="hint-text" id="nerStatus" hidden></p>
+
                 <label class="field">
                   <span>OCR / Supplier Text</span>
                   <textarea id="ocrText" rows="8" placeholder="Example: Sharma Steel Traders&#10;Date 09/06/2026&#10;GSTIN 27ABCDE1234F1Z5&#10;Material Steel sheets&#10;Quantity 50 kg&#10;Amount INR 15000&#10;CGST INR 1350 SGST INR 1350"></textarea>
@@ -330,6 +332,11 @@
           <section class="screen" id="reportsScreen" data-title="Reports & Analytics" data-eyebrow="Insights">
             <div class="dashboard-grid">
               <section class="panel">
+                <h2>AI Recommendations</h2>
+                <p class="hint-text">Computed locally from your expense data — no cloud, no API key.</p>
+                <div id="aiRecommendations" class="recommendation-list"></div>
+              </section>
+              <section class="panel">
                 <h2>Monthly Summary</h2>
                 <div id="monthlyReport" class="report-list"></div>
               </section>
@@ -410,7 +417,7 @@
       // Track auth mode globally
       window.currentAuthMode = 'login';
     </script>
-    <script src="app.js?v=19"></script>
+    <script src="app.js?v=20"></script>
     <script>
       // Ensure auth mode buttons work
       document.addEventListener('DOMContentLoaded', function() {

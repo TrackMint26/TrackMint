@@ -79,7 +79,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background: radial-gradient(circle at 18% 10%, rgba(34, 160, 107, 0.14), transparent 24%),
-    radial-gradient(circle at 85% 20%, rgba(15, 125, 114, 0.12), transparent 20%),
+    radial-gradient(circle at 85% 20%, rgba(106, 63, 209, 0.12), transparent 20%),
     var(--bg);
   color: var(--ink);
   font-family: var(--font);
@@ -87,12 +87,12 @@ body {
 }
 
 ::selection {
-  background: rgba(15, 125, 114, 0.35);
+  background: rgba(106, 63, 209, 0.35);
   color: #fff;
 }
 
 ::-moz-selection {
-  background: rgba(15, 125, 114, 0.35);
+  background: rgba(106, 63, 209, 0.35);
   color: #fff;
 }
 
@@ -227,7 +227,7 @@ html[data-theme="dark"] .brand-preview strong {
 
 .nav-tabs button.active,
 .mode-switch button.active {
-  background: rgba(15, 125, 114, 0.12);
+  background: rgba(106, 63, 209, 0.12);
   color: var(--primary);
 }
 
@@ -1026,7 +1026,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(15, 125, 114, 0.13);
+  box-shadow: 0 0 0 3px rgba(106, 63, 209, 0.13);
 }
 
 textarea {
@@ -1203,7 +1203,45 @@ th {
 }
 
 .status-select:focus {
-  box-shadow: 0 0 0 2px rgba(15, 125, 114, 0.35);
+  box-shadow: 0 0 0 2px rgba(106, 63, 209, 0.35);
+}
+
+.hint-text {
+  margin: -6px 0 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.recommendation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.recommendation-item {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.recommendation-info {
+  background: #e8f1fb;
+  border-color: #cfe0f5;
+  color: #2e6ea6;
+}
+
+.recommendation-warning {
+  background: #fff4d9;
+  border-color: #f1dfa6;
+  color: #b87911;
+}
+
+.recommendation-success {
+  background: #dcf3e8;
+  border-color: #bfe6d3;
+  color: var(--accent);
 }
 
 .row-button,

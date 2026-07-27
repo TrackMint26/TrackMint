@@ -61,6 +61,7 @@ const fields = {
   ocrProgressBar: document.getElementById("ocrProgressBar"),
   ocrStatus: document.getElementById("ocrStatus"),
   ocrText: document.getElementById("ocrText"),
+  nerStatus: document.getElementById("nerStatus"),
   vendor: document.getElementById("vendor"),
   supplierPhone: document.getElementById("supplierPhone"),
   date: document.getElementById("date"),
@@ -104,6 +105,7 @@ const fields = {
   monthlyReport: document.getElementById("monthlyReport"),
   supplierReport: document.getElementById("supplierReport"),
   aiWorkflowReport: document.getElementById("aiWorkflowReport"),
+  aiRecommendations: document.getElementById("aiRecommendations"),
   workflowSteps: [...document.querySelectorAll("[data-workflow-step]")],
   profileForm: document.getElementById("profileForm"),
   profileName: document.getElementById("profileName"),
@@ -904,13 +906,60 @@ const clearNonSupplierOcrFields = () => {
   fields.quantity.value = "";
 };
 
-const extractDetails = () => {
+// Named Entity Recognition — Xenova/bert-base-NER (an ONNX build of
+// dslim/bert-base-NER) running fully client-side via transformers.js/WASM,
+// same "no server, ships with the page" pattern as the Tesseract.js OCR
+// engine. Used specifically as a VENDOR-NAME fallback, not a replacement for
+// the regex/label-based extraction above: bert-base-NER recognizes PERSON/
+// ORGANIZATION/LOCATION/MISC spans, which is exactly suited to catching a
+// business name when a bill has no explicit "Vendor Name:" label for the
+// existing rule-based extractor to latch onto — it has no concept of dates,
+// amounts, or GSTINs, so those stay purely rule-based.
+let nerPipelinePromise = null;
+const getNerPipeline = () => {
+  if (!nerPipelinePromise) {
+    nerPipelinePromise = import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0").then(
+      ({ pipeline }) =>
+        pipeline("token-classification", "Xenova/bert-base-NER", {
+          progress_callback: (event) => {
+            if (!fields.nerStatus) return;
+            fields.nerStatus.hidden = false;
+            if (event.status === "progress" && typeof event.progress === "number") {
+              fields.nerStatus.textContent = `Loading AI model for supplier detection (one-time download)... ${Math.round(event.progress)}%`;
+            } else if (event.status === "initiate" || event.status === "download") {
+              fields.nerStatus.textContent = "Loading AI model for supplier detection (one-time download)...";
+            }
+          },
+        })
+    );
+  }
+  return nerPipelinePromise;
+};
+
+const guessVendorWithNer = async (text) => {
+  const classifier = await getNerPipeline();
+  // The vendor/business name is almost always the very first line of a bill.
+  // Testing showed feeding the model several lines at once occasionally
+  // fuses the org span with an adjacent line (e.g. "Company Name" + the next
+  // line's address town both tagged as one entity) — restricting to just the
+  // first line removes that ambiguity rather than trying to filter it out
+  // after the fact.
+  const firstLine = normalizeLines(text)[0] || text.slice(0, 100);
+  const entities = await classifier(firstLine, { aggregation_strategy: "simple" });
+  const org = entities
+    .filter((entity) => entity.entity_group === "ORG" && entity.score > 0.5)
+    .sort((a, b) => b.score - a.score)[0];
+  return org ? org.word.trim() : "";
+};
+
+const extractDetails = async () => {
   const raw = fields.ocrText.value || "";
   const text = normalizeOcrText(raw.trim());
   if (!text) {
     alert("Paste bill text or use the sample bill first.");
     return;
   }
+  fields.nerStatus.hidden = true;
   clearNonSupplierOcrFields();
   const normalizedDate = parseDate(text);
   if (normalizedDate) {
@@ -926,20 +975,38 @@ const extractDetails = () => {
   fields.category.value = guessCategory(text);
 
   // Prefer strict vendor section extraction when the document contains an explicit Vendor/Supplier area
+  let vendorFromRules = "";
   if (hasExplicitVendorSection(text)) {
     const vendorLines = extractVendorSection(text);
-    fields.vendor.value = guessVendorFromLines(vendorLines);
+    vendorFromRules = guessVendorFromLines(vendorLines);
     fields.supplierPhone.value = guessPhoneFromLines(vendorLines);
     fields.gstin.value = extractVendorGstinFromLines(vendorLines);
     const address = extractVendorAddress(vendorLines);
     fields.notes.value = "Captured from Track Mint OCR" + (address ? ` | Vendor Address: ${address}` : "");
   } else {
-    fields.vendor.value = guessVendor(text);
+    vendorFromRules = guessVendor(text);
     fields.supplierPhone.value = guessPhone(text) || guessPhoneFromLines(normalizeLines(text));
     fields.gstin.value = extractVendorGstin(text);
     fields.notes.value = "Captured from Track Mint OCR";
   }
+  fields.vendor.value = vendorFromRules;
   setWorkflowStage("classify");
+
+  if (!vendorFromRules || vendorFromRules.length < 3) {
+    try {
+      const nerVendor = await guessVendorWithNer(text);
+      if (nerVendor) {
+        fields.vendor.value = nerVendor;
+        fields.nerStatus.textContent = `AI (NER) detected supplier name: "${nerVendor}"`;
+        fields.nerStatus.hidden = false;
+      } else {
+        fields.nerStatus.hidden = true;
+      }
+    } catch (error) {
+      console.warn("NER vendor detection failed:", error);
+      fields.nerStatus.hidden = true;
+    }
+  }
 };
 
 const dataURLToBlob = (dataURL) => {
@@ -1087,7 +1154,7 @@ const runImageOcr = async () => {
   if (file.type === "text/plain") {
     const text = await file.text();
     fields.ocrText.value = text;
-    extractDetails();
+    await extractDetails();
     setOcrProgress("Text loaded from file. Supplier details populated.", 1);
     return;
   }
@@ -1110,7 +1177,7 @@ const runImageOcr = async () => {
     const text = await runBrowserOcr(ocrFile);
     if (text) {
       fields.ocrText.value = text;
-      extractDetails();
+      await extractDetails();
       setOcrProgress("OCR complete. Supplier details extracted.", 1);
       return;
     }
@@ -1708,7 +1775,136 @@ const showExpenseDetails = (expense) => {
   renderSupplierPeriodTotals(expense.vendor);
 };
 
+// Free, local, rule-based "AI recommendations" — every insight here is
+// computed directly from state.expenses in the browser: no API key, no
+// network call, no cloud model. Kept distinct from the NER model above
+// (which reads unstructured text to find a name) — this reads the
+// already-structured expense records to spot patterns worth flagging.
+const generateAiRecommendations = () => {
+  const recommendations = [];
+  if (!state.expenses.length) {
+    return [{ level: "info", text: "No expenses recorded yet — scan a bill to start seeing recommendations here." }];
+  }
+
+  const grandTotal = state.expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0) || 1;
+
+  // Month-over-month spend trend
+  const monthlyTotals = groupTotal(state.expenses, (expense) => (expense.date || "").slice(0, 7));
+  const months = Object.keys(monthlyTotals).filter(Boolean).sort();
+  if (months.length >= 2) {
+    const currentMonth = months[months.length - 1];
+    const previousMonth = months[months.length - 2];
+    const current = monthlyTotals[currentMonth];
+    const previous = monthlyTotals[previousMonth];
+    if (previous > 0) {
+      const changePct = ((current - previous) / previous) * 100;
+      if (changePct >= 20) {
+        recommendations.push({
+          level: "warning",
+          text: `Spending in ${formatMonthLabel(currentMonth)} is up ${Math.round(changePct)}% vs ${formatMonthLabel(previousMonth)} (INR ${formatMoney(current)} vs INR ${formatMoney(previous)}) — worth a quick review.`,
+        });
+      } else if (changePct <= -20) {
+        recommendations.push({
+          level: "success",
+          text: `Spending in ${formatMonthLabel(currentMonth)} is down ${Math.round(Math.abs(changePct))}% vs ${formatMonthLabel(previousMonth)}.`,
+        });
+      }
+    }
+  }
+
+  // Supplier concentration risk
+  const supplierTotals = groupTotal(state.expenses, (expense) => expense.vendor);
+  const topSupplier = byAmount(Object.entries(supplierTotals).map(([vendor, amount]) => ({ vendor, amount })))[0];
+  if (topSupplier && Object.keys(supplierTotals).length > 1) {
+    const share = topSupplier.amount / grandTotal;
+    if (share >= 0.4) {
+      recommendations.push({
+        level: "warning",
+        text: `${topSupplier.vendor} accounts for ${Math.round(share * 100)}% of total spend — consider a backup supplier to reduce dependency risk.`,
+      });
+    }
+  }
+
+  // Raw material budget proximity (mirrors the alert-banner threshold logic)
+  const rawLimit = Number(fields.rawMaterialLimit.value || 0);
+  const rawTotal = getRawMaterialTotal();
+  if (rawLimit > 0) {
+    const usedShare = rawTotal / rawLimit;
+    if (usedShare >= 1) {
+      recommendations.push({
+        level: "warning",
+        text: `Raw material spend (INR ${formatMoney(rawTotal)}) has crossed your set limit of INR ${formatMoney(rawLimit)}.`,
+      });
+    } else if (usedShare >= 0.8) {
+      recommendations.push({
+        level: "warning",
+        text: `Raw material spend is at ${Math.round(usedShare * 100)}% of your INR ${formatMoney(rawLimit)} limit — approaching the threshold.`,
+      });
+    }
+  }
+
+  // Duplicate bills awaiting review
+  const duplicateCount = countFlaggedDuplicateExpenses();
+  if (duplicateCount > 0) {
+    recommendations.push({
+      level: "warning",
+      text: `${duplicateCount} bill${duplicateCount > 1 ? "s" : ""} flagged as possible duplicates — review the Expense List to confirm they aren't double-counted.`,
+    });
+  }
+
+  // Pending approvals backlog
+  const pendingCount = state.expenses.filter((expense) => expense.status === "Pending").length;
+  if (pendingCount >= 5) {
+    recommendations.push({
+      level: "info",
+      text: `${pendingCount} bills are still marked Pending — approve or reject them to keep the ledger current.`,
+    });
+  }
+
+  // Missing-GSTIN compliance check
+  const missingGstinCount = state.expenses.filter((expense) => !expense.gstin).length;
+  if (missingGstinCount > 0) {
+    const share = Math.round((missingGstinCount / state.expenses.length) * 100);
+    if (share >= 20) {
+      recommendations.push({
+        level: "info",
+        text: `${missingGstinCount} bill${missingGstinCount > 1 ? "s" : ""} (${share}%) have no GSTIN recorded — worth checking for GST input credit eligibility.`,
+      });
+    }
+  }
+
+  // Top category concentration
+  const categoryTotals = groupTotal(state.expenses, (expense) => expense.category);
+  const topCategory = byAmount(Object.entries(categoryTotals).map(([category, amount]) => ({ category, amount })))[0];
+  if (topCategory) {
+    const share = topCategory.amount / grandTotal;
+    if (share >= 0.5) {
+      recommendations.push({
+        level: "info",
+        text: `${topCategory.category} makes up ${Math.round(share * 100)}% of all spend — your single biggest cost category.`,
+      });
+    }
+  }
+
+  if (!recommendations.length) {
+    recommendations.push({ level: "success", text: "No unusual spending patterns detected — everything looks steady." });
+  }
+  return recommendations;
+};
+
+const renderAiRecommendations = () => {
+  if (!fields.aiRecommendations) return;
+  fields.aiRecommendations.innerHTML = "";
+  generateAiRecommendations().forEach((rec) => {
+    const item = document.createElement("div");
+    item.className = `recommendation-item recommendation-${rec.level}`;
+    item.textContent = rec.text;
+    fields.aiRecommendations.appendChild(item);
+  });
+};
+
 const renderReports = () => {
+  renderAiRecommendations();
   const monthly = groupTotal(state.expenses, (expense) => (expense.date || "").slice(0, 7));
   fields.monthlyReport.innerHTML = "";
   Object.entries(monthly).forEach(([month, amount]) => {
