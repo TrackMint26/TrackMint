@@ -981,6 +981,35 @@ html[data-theme="dark"] .palette span::before {
   font-weight: 800;
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-left: 42px;
+}
+
+.password-toggle {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  place-items: center;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover {
+  color: var(--primary);
+}
+
 .check-field {
   display: flex;
   align-items: center;

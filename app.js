@@ -37,6 +37,7 @@ const fields = {
   authName: document.getElementById("authName"),
   authEmail: document.getElementById("authEmail"),
   authPassword: document.getElementById("authPassword"),
+  authPasswordToggle: document.getElementById("authPasswordToggle"),
   authSubmitButton: document.getElementById("authSubmitButton"),
   logoutButton: document.getElementById("logoutButton"),
   navButtons: [...document.querySelectorAll("[data-screen]")],
@@ -2573,6 +2574,15 @@ if (fields.themeToggle) {
     applyTheme(nextTheme);
   });
 }
+
+fields.authPasswordToggle.addEventListener("click", () => {
+  const showing = fields.authPassword.type === "text";
+  fields.authPassword.type = showing ? "password" : "text";
+  fields.authPasswordToggle.querySelector(".icon-eye").hidden = !showing;
+  fields.authPasswordToggle.querySelector(".icon-eye-off").hidden = showing;
+  fields.authPasswordToggle.setAttribute("aria-pressed", String(!showing));
+  fields.authPasswordToggle.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+});
 // Offline support: a service worker caches the app shell and every CDN
 // script/asset (Tesseract.js, pdf.js, and the WASM/traineddata Tesseract.js
 // itself fetches at runtime) the first time they're used online, so the app
