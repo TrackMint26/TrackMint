@@ -1585,10 +1585,15 @@ html[data-theme="dark"] .chart-label {
   }
 
   .top-actions,
-  .top-actions button,
+  .top-actions .secondary,
   .panel-header select,
   .sms-link {
     width: 100%;
+  }
+
+  .top-actions .icon-button {
+    width: 44px;
+    margin-left: auto;
   }
 
   .ai-procedure {
