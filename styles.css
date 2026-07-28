@@ -235,6 +235,10 @@ html[data-theme="dark"] .brand-preview strong {
   margin-top: auto;
 }
 
+.logout-button-top {
+  display: none;
+}
+
 .main-shell {
   min-width: 0;
 }
@@ -1515,6 +1519,10 @@ html[data-theme="dark"] .chart-label {
     display: none;
   }
 
+  .logout-button-top {
+    display: block;
+  }
+
   .nav-tabs {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
@@ -1595,6 +1603,27 @@ html[data-theme="dark"] .chart-label {
   }
 
   .ai-procedure {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .procedure-step {
+    padding: 8px;
+    gap: 2px 6px;
+  }
+
+  .procedure-step span {
+    width: 22px;
+    height: 22px;
+    font-size: 0.72rem;
+  }
+
+  .procedure-step strong {
+    font-size: 0.78rem;
+  }
+
+  .procedure-step small {
+    font-size: 0.66rem;
   }
 }

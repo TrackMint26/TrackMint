@@ -42,6 +42,7 @@ const fields = {
   authPasswordToggle: document.getElementById("authPasswordToggle"),
   authSubmitButton: document.getElementById("authSubmitButton"),
   logoutButton: document.getElementById("logoutButton"),
+  logoutButtonTop: document.getElementById("logoutButtonTop"),
   navButtons: [...document.querySelectorAll("[data-screen]")],
   authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
   screens: [...document.querySelectorAll(".screen")],
@@ -2412,11 +2413,13 @@ fields.authForm.addEventListener("submit", (event) => {
 fields.authModeButtons.forEach((button) => button.addEventListener("click", () => setAuthMode(button.dataset.authMode)));
 fields.navButtons.forEach((button) => button.addEventListener("click", () => setScreen(button.dataset.screen)));
 fields.quickScanButton.addEventListener("click", () => setScreen("scan"));
-fields.logoutButton.addEventListener("click", () => {
+const doLogout = () => {
   localStorage.removeItem(authKey);
   state.user = null;
   showAuth();
-});
+};
+fields.logoutButton.addEventListener("click", doLogout);
+fields.logoutButtonTop.addEventListener("click", doLogout);
 
 
 document.getElementById("extractButton").addEventListener("click", extractDetails);
