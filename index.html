@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="app-icon.png" />
-    <link rel="stylesheet" href="styles.css?v=20" />
+    <link rel="stylesheet" href="styles.css?v=21" />
   </head>
   <body>
     <div class="app-frame">
@@ -86,9 +86,15 @@
             </div>
             <div class="top-actions">
               <span class="offline-badge" id="offlineBadge" hidden>Offline — showing saved data</span>
-              <button class="secondary" id="quickScanButton">Scan Receipt</button>
+              <button class="secondary" id="quickScanButton" title="Scan Receipt" aria-label="Scan Receipt">
+                <svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z"/><circle cx="12" cy="13" r="4"/></svg>
+                <span>Scan Receipt</span>
+              </button>
               <button class="icon-button" id="themeToggle" type="button" title="Toggle light and dark mode" aria-label="Toggle theme">🌙</button>
-              <button class="secondary" id="exportCsvButton" title="Export expenses as CSV" aria-label="Export expenses as CSV">Export CSV</button>
+              <button class="secondary" id="exportCsvButton" title="Export expenses as CSV" aria-label="Export expenses as CSV">
+                <svg class="btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>
+                <span>Export CSV</span>
+              </button>
             </div>
           </header>
 
@@ -501,7 +507,7 @@
       // Track auth mode globally
       window.currentAuthMode = 'login';
     </script>
-    <script src="app.js?v=24"></script>
+    <script src="app.js?v=25"></script>
     <script>
       // Ensure auth mode buttons work
       document.addEventListener('DOMContentLoaded', function() {

@@ -370,6 +370,13 @@ html[data-theme="dark"] .mode-switch button.active {
   transition: transform 0.18s ease, background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 
+.top-actions .secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .icon-button {
   width: 44px;
   background: var(--ink);
@@ -1585,15 +1592,24 @@ html[data-theme="dark"] .chart-label {
   }
 
   .top-actions,
-  .top-actions .secondary,
   .panel-header select,
   .sms-link {
     width: 100%;
   }
 
+  .top-actions {
+    justify-content: flex-end;
+  }
+
+  .top-actions .secondary,
   .top-actions .icon-button {
     width: 44px;
-    margin-left: auto;
+    padding: 0;
+    gap: 0;
+  }
+
+  .top-actions .secondary span {
+    display: none;
   }
 
   .ai-procedure {
@@ -1619,5 +1635,85 @@ html[data-theme="dark"] .chart-label {
 
   .procedure-step small {
     font-size: 0.66rem;
+  }
+
+  /* Settings: flatten the two gradient panels into one grouped list, like a typical app's settings screen. */
+  #settingsScreen .dashboard-grid {
+    gap: 22px;
+  }
+
+  #settingsScreen .settings-form,
+  #settingsScreen .brand-guide,
+  html[data-theme="dark"] #settingsScreen .settings-form,
+  html[data-theme="dark"] #settingsScreen .brand-guide {
+    background: var(--surface);
+    border-color: var(--line);
+    padding: 4px 16px;
+    box-shadow: none;
+  }
+
+  #settingsScreen h2 {
+    font-size: 0.98rem;
+    padding: 14px 0 2px;
+  }
+
+  #settingsScreen .owner-note {
+    margin: 6px 0 0;
+  }
+
+  #settingsScreen .field,
+  #settingsScreen .check-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 0;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  #settingsScreen .field:last-of-type,
+  #settingsScreen .check-field:last-of-type {
+    border-bottom: 0;
+  }
+
+  #settingsScreen .check-field {
+    flex-direction: row-reverse;
+  }
+
+  #settingsScreen .field input {
+    width: auto;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+  }
+
+  #settingsScreen #saveSettingsButton {
+    width: 100%;
+    margin-top: 16px;
+  }
+
+  #settingsScreen .brand-preview {
+    background: transparent;
+    border: 0;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  #settingsScreen .palette {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  #settingsScreen .brand-guide p {
+    padding: 10px 0;
+    margin: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  #settingsScreen .brand-guide p:last-child {
+    border-bottom: 0;
   }
 }
