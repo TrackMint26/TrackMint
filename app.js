@@ -42,7 +42,9 @@ const fields = {
   authPasswordToggle: document.getElementById("authPasswordToggle"),
   authSubmitButton: document.getElementById("authSubmitButton"),
   logoutButton: document.getElementById("logoutButton"),
-  logoutButtonTop: document.getElementById("logoutButtonTop"),
+  sidebar: document.getElementById("sidebar"),
+  menuToggleButton: document.getElementById("menuToggleButton"),
+  navBackdrop: document.getElementById("navBackdrop"),
   navButtons: [...document.querySelectorAll("[data-screen]")],
   authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
   screens: [...document.querySelectorAll(".screen")],
@@ -2411,7 +2413,12 @@ fields.authForm.addEventListener("submit", (event) => {
 });
 
 fields.authModeButtons.forEach((button) => button.addEventListener("click", () => setAuthMode(button.dataset.authMode)));
-fields.navButtons.forEach((button) => button.addEventListener("click", () => setScreen(button.dataset.screen)));
+fields.navButtons.forEach((button) =>
+  button.addEventListener("click", () => {
+    setScreen(button.dataset.screen);
+    closeMenu();
+  })
+);
 fields.quickScanButton.addEventListener("click", () => setScreen("scan"));
 const doLogout = () => {
   localStorage.removeItem(authKey);
@@ -2419,7 +2426,21 @@ const doLogout = () => {
   showAuth();
 };
 fields.logoutButton.addEventListener("click", doLogout);
-fields.logoutButtonTop.addEventListener("click", doLogout);
+
+const openMenu = () => {
+  fields.sidebar.classList.add("open");
+  fields.navBackdrop.hidden = false;
+  fields.menuToggleButton.setAttribute("aria-expanded", "true");
+};
+const closeMenu = () => {
+  fields.sidebar.classList.remove("open");
+  fields.navBackdrop.hidden = true;
+  fields.menuToggleButton.setAttribute("aria-expanded", "false");
+};
+fields.menuToggleButton.addEventListener("click", () => {
+  fields.sidebar.classList.contains("open") ? closeMenu() : openMenu();
+});
+fields.navBackdrop.addEventListener("click", closeMenu);
 
 
 document.getElementById("extractButton").addEventListener("click", extractDetails);

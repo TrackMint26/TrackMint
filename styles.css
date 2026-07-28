@@ -235,7 +235,11 @@ html[data-theme="dark"] .brand-preview strong {
   margin-top: auto;
 }
 
-.logout-button-top {
+.nav-backdrop {
+  display: none;
+}
+
+.menu-toggle {
   display: none;
 }
 
@@ -334,6 +338,12 @@ html[data-theme="dark"] .mode-switch button.active {
 
 .topbar {
   margin-bottom: 18px;
+}
+
+.topbar-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .top-actions {
@@ -1501,51 +1511,43 @@ html[data-theme="dark"] .chart-label {
     grid-template-columns: 1fr;
   }
 
+  .menu-toggle {
+    display: grid;
+    place-items: center;
+  }
+
   .sidebar {
     position: fixed;
-    z-index: 10;
-    right: 0;
-    bottom: 0;
+    z-index: 50;
+    top: 0;
     left: 0;
-    top: auto;
-    height: auto;
-    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
-    border-top: 1px solid var(--line);
-    border-right: 0;
+    bottom: 0;
+    right: auto;
+    width: min(78vw, 300px);
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+    border-right: 1px solid var(--line);
+    border-top: 0;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow-y: auto;
   }
 
-  .brand,
-  .logout-button {
-    display: none;
+  .sidebar.open {
+    transform: translateX(0);
   }
 
-  .logout-button-top {
+  .nav-backdrop {
     display: block;
-  }
-
-  .nav-tabs {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-    gap: 4px 6px;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(10, 6, 20, 0.5);
   }
 
   .nav-tabs button {
-    min-height: 44px;
-    padding: 4px 2px;
-    font-size: 0.72rem;
-    line-height: 1.15;
-    text-align: center;
-  }
-
-  .app-content {
-    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
-  }
-}
-
-/* Tablet portrait: eight nav items still fit on one row here, so keep it compact. */
-@media (min-width: 821px) and (max-width: 980px) {
-  .nav-tabs {
-    grid-template-columns: repeat(8, minmax(0, 1fr));
+    min-height: 48px;
+    font-size: 0.95rem;
   }
 }
 
@@ -1587,19 +1589,6 @@ html[data-theme="dark"] .chart-label {
   .panel-header select,
   .sms-link {
     width: 100%;
-  }
-
-  .nav-tabs {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .nav-tabs button {
-    font-size: 0.64rem;
-    min-height: 42px;
-  }
-
-  .app-content {
-    padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
   }
 
   .ai-procedure {

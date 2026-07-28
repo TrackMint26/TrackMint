@@ -8,11 +8,13 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="app-icon.png" />
-    <link rel="stylesheet" href="styles.css?v=18" />
+    <link rel="stylesheet" href="styles.css?v=19" />
   </head>
   <body>
     <div class="app-frame">
-      <aside class="sidebar">
+      <div class="nav-backdrop" id="navBackdrop" hidden></div>
+
+      <aside class="sidebar" id="sidebar">
         <a class="brand" href="#dashboard" aria-label="Track Mint dashboard">
           <img src="app-icon.png" alt="" />
           <span>
@@ -73,16 +75,20 @@
 
         <section class="app-content" id="appContent" hidden>
           <header class="topbar">
-            <div>
-              <p class="eyebrow" id="screenEyebrow">Track Mint</p>
-              <h1 id="screenTitle">Dashboard</h1>
+            <div class="topbar-title">
+              <button class="icon-button menu-toggle" id="menuToggleButton" type="button" title="Menu" aria-label="Open menu" aria-expanded="false">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+              </button>
+              <div>
+                <p class="eyebrow" id="screenEyebrow">Track Mint</p>
+                <h1 id="screenTitle">Dashboard</h1>
+              </div>
             </div>
             <div class="top-actions">
               <span class="offline-badge" id="offlineBadge" hidden>Offline — showing saved data</span>
               <button class="secondary" id="quickScanButton">Scan Receipt</button>
               <button class="icon-button" id="themeToggle" type="button" title="Toggle light and dark mode" aria-label="Toggle theme">🌙</button>
               <button class="secondary" id="exportCsvButton" title="Export expenses as CSV" aria-label="Export expenses as CSV">Export CSV</button>
-              <button class="secondary logout-button-top" id="logoutButtonTop" type="button">Logout</button>
             </div>
           </header>
 
@@ -495,7 +501,7 @@
       // Track auth mode globally
       window.currentAuthMode = 'login';
     </script>
-    <script src="app.js?v=23"></script>
+    <script src="app.js?v=24"></script>
     <script>
       // Ensure auth mode buttons work
       document.addEventListener('DOMContentLoaded', function() {
