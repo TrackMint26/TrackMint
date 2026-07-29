@@ -999,6 +999,24 @@ const significantWords = (text) =>
     .split(/\s+/)
     .filter((word) => word.length > 2 && !["the", "and", "ltd", "llp", "inc", "pvt", "private", "limited"].includes(word));
 
+// DuckDuckGo's disambiguation candidates (RelatedTopics) don't carry an Entity
+// field like the primary Abstract result does, so a plain word-overlap score
+// can't tell a real company apart from an unrelated topic that merely shares
+// one word (e.g. "Secure Shell" the network protocol vs "Shell plc" the fuel
+// company, for a query starting with "Shell"). This text-based hint fills
+// that gap for the candidate-list path.
+const BUSINESS_HINT_WORDS = [
+  "company", "corporation", "plc", "multinational", "enterprise", "enterprises", "retailer", "retail",
+  "headquartered", "founded", "manufactur", "supplier", "traders", "industries", "group", "chain",
+  "franchise", "dealership", "petrol", "fuel", "store", "shop",
+];
+const looksLikeBusiness = (data) => {
+  const entity = (data.Entity || "").toLowerCase();
+  if (entity.includes("compan") || entity.includes("business")) return true;
+  const text = (data.Abstract || "").toLowerCase();
+  return BUSINESS_HINT_WORDS.some((word) => text.includes(word));
+};
+
 const supplierMatchConfidence = (queryName, data) => {
   const queryWords = significantWords(queryName);
   const headingWords = new Set(significantWords(data.Heading || ""));
@@ -1008,13 +1026,107 @@ const supplierMatchConfidence = (queryName, data) => {
   const matchedInHeading = queryWords.filter((word) => headingWords.has(word)).length;
   const matchedInAbstract = queryWords.filter((word) => abstractWords.has(word)).length;
   let score = Math.max(matchedInHeading / queryWords.length, matchedInAbstract / queryWords.length);
-  if ((data.Entity || "").toLowerCase().includes("compan") || (data.Entity || "").toLowerCase().includes("business")) {
+  if (looksLikeBusiness(data)) {
     score = Math.min(1, score + 0.15);
   }
 
   if (score >= 0.7) return { score, label: "High", className: "confidence-high" };
   if (score >= 0.35) return { score, label: "Medium", className: "confidence-medium" };
   return { score, label: "Low", className: "confidence-low" };
+};
+
+const fetchDdgTopic = async (query, { skipDisambig = false } = {}) => {
+  try {
+    const params = new URLSearchParams({ q: query, format: "json", no_html: "1" });
+    if (skipDisambig) params.set("skip_disambig", "1");
+    const response = await fetch(`https://api.duckduckgo.com/?${params.toString()}`);
+    if (response.ok) return await response.json();
+  } catch (error) {
+    console.warn("Supplier lookup failed:", error);
+  }
+  return null;
+};
+
+const renderSupplierCard = (name, data) => {
+  const heading = data.Heading || name;
+  const summary = data.AbstractText || data.Abstract || "";
+  const truncated = summary.length > 260 ? `${summary.slice(0, 260).trim()}...` : summary;
+  const image = data.Image ? (String(data.Image).startsWith("http") ? data.Image : `https://duckduckgo.com${data.Image}`) : "";
+  const confidence = supplierMatchConfidence(name, data);
+  fields.supplierLookup.innerHTML = `
+    <div class="supplier-lookup-card">
+      ${image ? `<img src="${escapeHtml(image)}" alt="" />` : ""}
+      <div>
+        <strong>${escapeHtml(heading)}</strong>
+        ${summary ? `<p>${escapeHtml(truncated)}</p>` : ""}
+        <div class="supplier-lookup-meta">
+          ${String(data.AbstractURL || "").startsWith("http") ? `<a href="${escapeHtml(data.AbstractURL)}" target="_blank" rel="noopener">Source: ${escapeHtml(data.AbstractSource || "Wikipedia")} &#8599;</a>` : ""}
+          <span class="supplier-lookup-disclaimer">Free public lookup, not an official business/GST verification.</span>
+        </div>
+        <div class="confidence-badge ${confidence.className}" title="How closely this result's title matches the scanned supplier name — not a measure of the information's factual accuracy.">
+          Match confidence: ${confidence.label} (${Math.round(confidence.score * 100)}%)
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+// DuckDuckGo's RelatedTopics entries don't come with a clean name field — the
+// cleanest name is the last segment of the topic's own URL (its Wikipedia
+// page title), not the run-on Text sentence, which just repeats it.
+const parseRelatedTopic = (topic) => {
+  const pageTitle = decodeURIComponent(String(topic.FirstURL || "").split("/").pop() || "").replace(/_/g, " ");
+  let text = topic.Text || "";
+  if (pageTitle && text.startsWith(pageTitle)) {
+    text = text.slice(pageTitle.length).trim();
+  }
+  return { heading: pageTitle || text.slice(0, 40), text, url: topic.FirstURL || "" };
+};
+
+let currentSupplierCandidates = [];
+
+const renderSupplierCandidates = (name, candidates) => {
+  currentSupplierCandidates = candidates;
+  const rows = candidates
+    .map((candidate, index) => {
+      const confidence = supplierMatchConfidence(name, { Heading: candidate.heading, Abstract: candidate.text });
+      return `
+        <div class="supplier-candidate">
+          <div>
+            <strong>${escapeHtml(candidate.heading)}</strong>
+            <p>${escapeHtml(candidate.text)}</p>
+            <div class="confidence-badge ${confidence.className}" title="How closely this candidate matches the scanned supplier name — not a measure of the information's factual accuracy.">
+              Match confidence: ${confidence.label} (${Math.round(confidence.score * 100)}%)
+            </div>
+          </div>
+          <div class="supplier-candidate-actions">
+            ${candidate.url ? `<a href="${escapeHtml(candidate.url)}" target="_blank" rel="noopener">View &#8599;</a>` : ""}
+            <button type="button" class="secondary" data-use-candidate="${index}">Use this</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  fields.supplierLookup.innerHTML = `
+    <div class="supplier-lookup-candidates">
+      <p class="supplier-lookup-status">OCR text can be inaccurate — here are the closest free-source matches for "${escapeHtml(name)}". Pick the right one, or search manually:</p>
+      ${rows}
+      <div class="supplier-lookup-meta"><a href="${escapeHtml(searchWebUrl(name))}" target="_blank" rel="noopener">None of these — search the web instead &#8599;</a></div>
+    </div>
+  `;
+};
+
+const selectSupplierCandidate = (index) => {
+  const candidate = currentSupplierCandidates[index];
+  if (!candidate) return;
+  fields.vendor.value = candidate.heading;
+  renderSupplierCard(candidate.heading, {
+    Heading: candidate.heading,
+    Abstract: candidate.text,
+    AbstractText: candidate.text,
+    AbstractURL: candidate.url,
+    AbstractSource: "Wikipedia",
+  });
 };
 
 const lookupSupplierInfo = async (vendorName) => {
@@ -1028,42 +1140,49 @@ const lookupSupplierInfo = async (vendorName) => {
   fields.supplierLookup.hidden = false;
   fields.supplierLookup.innerHTML = `<p class="supplier-lookup-status">Checking free public sources for "${escapeHtml(name)}"...</p>`;
 
-  let data = null;
-  try {
-    const response = await fetch(
-      `https://api.duckduckgo.com/?q=${encodeURIComponent(name)}&format=json&no_html=1&skip_disambig=1`
-    );
-    if (response.ok) {
-      data = await response.json();
-    }
-  } catch (error) {
-    console.warn("Supplier lookup failed:", error);
+  const primary = await fetchDdgTopic(name, { skipDisambig: true });
+  if (primary && primary.Abstract) {
+    renderSupplierCard(name, primary);
+    return;
   }
 
-  // Only trust the DuckDuckGo/Wikipedia abstract for name matches that read as company results are not
-  // guaranteed, so we just check the Abstract text exists.
-  if (data && data.Abstract) {
-    const heading = data.Heading || name;
-    const summary = data.AbstractText || data.Abstract;
-    const truncated = summary.length > 260 ? `${summary.slice(0, 260).trim()}...` : summary;
-    const image = data.Image ? `https://duckduckgo.com${data.Image}` : "";
-    const confidence = supplierMatchConfidence(name, data);
-    fields.supplierLookup.innerHTML = `
-      <div class="supplier-lookup-card">
-        ${image ? `<img src="${escapeHtml(image)}" alt="" />` : ""}
-        <div>
-          <strong>${escapeHtml(heading)}</strong>
-          <p>${escapeHtml(truncated)}</p>
-          <div class="supplier-lookup-meta">
-            ${String(data.AbstractURL || "").startsWith("http") ? `<a href="${escapeHtml(data.AbstractURL)}" target="_blank" rel="noopener">Source: ${escapeHtml(data.AbstractSource || "Wikipedia")} &#8599;</a>` : ""}
-            <span class="supplier-lookup-disclaimer">Free public lookup, not an official business/GST verification.</span>
-          </div>
-          <div class="confidence-badge ${confidence.className}" title="How closely this result's title matches the scanned supplier name — not a measure of the information's factual accuracy.">
-            Match confidence: ${confidence.label} (${Math.round(confidence.score * 100)}%)
-          </div>
-        </div>
-      </div>
-    `;
+  // OCR text is frequently garbled and rarely matches anything as a whole
+  // string — retry with just the first word, which is usually the one part
+  // of a vendor name OCR gets right (the recognizable brand), and surface
+  // its disambiguation candidates as choices instead of guessing one answer.
+  const words = name.split(/\s+/).filter(Boolean);
+  let candidates = [];
+  if (words.length > 1) {
+    const fallback = await fetchDdgTopic(words[0]);
+    if (fallback) {
+      const topicCandidates = (fallback.RelatedTopics || [])
+        .filter((topic) => topic.FirstURL && topic.Text)
+        .map(parseRelatedTopic);
+      if (fallback.Abstract) {
+        topicCandidates.unshift({
+          heading: fallback.Heading || words[0],
+          text: fallback.AbstractText || fallback.Abstract,
+          url: fallback.AbstractURL || "",
+        });
+      }
+      const seen = new Set();
+      candidates = topicCandidates
+        .filter((candidate) => {
+          if (!candidate.heading || seen.has(candidate.heading)) return false;
+          seen.add(candidate.heading);
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            supplierMatchConfidence(name, { Heading: b.heading, Abstract: b.text }).score -
+            supplierMatchConfidence(name, { Heading: a.heading, Abstract: a.text }).score
+        )
+        .slice(0, 4);
+    }
+  }
+
+  if (candidates.length) {
+    renderSupplierCandidates(name, candidates);
   } else {
     fields.supplierLookup.innerHTML = `
       <div class="supplier-lookup-card supplier-lookup-empty">
@@ -2682,6 +2801,11 @@ fields.detailVendorSelect.addEventListener("change", () => {
   showExpenseDetails(latestExpenseForVendor(vendor) || null);
 });
 
+fields.supplierLookup.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-use-candidate]");
+  if (!button) return;
+  selectSupplierCandidate(Number(button.dataset.useCandidate));
+});
 fields.paymentMethod.addEventListener("change", updateUpiSectionVisibility);
 fields.generateUpiButton.addEventListener("click", generateUpiPayRequest);
 

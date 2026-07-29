@@ -1400,6 +1400,58 @@ html[data-theme="dark"] .confidence-badge.confidence-low {
   border-color: var(--line);
 }
 
+.supplier-lookup-candidates {
+  display: grid;
+  gap: 10px;
+}
+
+.supplier-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.supplier-candidate strong {
+  display: block;
+  color: var(--ink);
+}
+
+.supplier-candidate p {
+  margin: 4px 0 8px;
+  font-size: 0.86rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.supplier-candidate-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.supplier-candidate-actions a {
+  color: #2e6ea6;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.supplier-candidate-actions button {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 0.85rem;
+}
+
+html[data-theme="dark"] .supplier-candidate strong {
+  color: #f8f4fd;
+}
+
 html[data-theme="dark"] .supplier-lookup-card {
   background: rgba(46, 110, 166, 0.16);
   border-color: rgba(46, 110, 166, 0.4);
