@@ -75,6 +75,7 @@ const fields = {
   dateWarning: document.getElementById("dateWarning"),
   category: document.getElementById("category"),
   amount: document.getElementById("amount"),
+  amountWarning: document.getElementById("amountWarning"),
   gstin: document.getElementById("gstin"),
   tax: document.getElementById("tax"),
   materialItem: document.getElementById("materialItem"),
@@ -534,6 +535,13 @@ const parseTaxLegacy = (text) => {
   return genericMatch ? Number(genericMatch[1].replace(/,/g, "")) : 0;
 };
 
+// Returns { value, confident }. confident=true means an explicit total was
+// actually found on the bill (a labeled total, or a subtotal+tax figure
+// that's mathematically derived from explicit numbers); confident=false
+// means no such declaration was found anywhere and the value is a
+// best-effort estimate that could be missing tax or other line items — the
+// caller should surface that distinction rather than presenting a guess
+// with the same confidence as a confirmed reading.
 const parseAmount = (text) => {
   const lines = normalizeLines(text);
   const taxLinePattern = /\b(?:cgst|sgst|igst|gstin|tax)\b/i;
@@ -546,7 +554,7 @@ const parseAmount = (text) => {
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     if (taxLinePattern.test(lines[i])) continue;
     const match = lines[i].match(strongLabelPattern);
-    if (match) return Number(match[1].replace(/,/g, ""));
+    if (match) return { value: Number(match[1].replace(/,/g, "")), confident: true };
   }
 
   // Weaker fallback: a bare "Amount" label with no stronger total wording
@@ -559,23 +567,23 @@ const parseAmount = (text) => {
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     if (taxLinePattern.test(lines[i])) continue;
     const match = lines[i].match(weakLabelPattern);
-    if (match) return Number(match[1].replace(/,/g, ""));
+    if (match) return { value: Number(match[1].replace(/,/g, "")), confident: true };
   }
 
   const currencyPattern = /(?:[₹$€£¥]|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)/i;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     if (taxLinePattern.test(lines[i])) continue;
     const match = lines[i].match(currencyPattern);
-    if (match) return Number(match[1].replace(/,/g, ""));
+    if (match) return { value: Number(match[1].replace(/,/g, "")), confident: true };
   }
 
   // No "total"-style label was legible at all — a real, common failure mode
-  // on formal tax invoices, where the Grand Total row often sits in a
-  // shaded/highlighted cell that OCR reads worse than plain line items. If a
+  // on formal tax invoices, where the summary block (Subtotal/tax/Grand
+  // Total) often sits in a shaded/differently-formatted table section that
+  // OCR reads worse than, or drops entirely versus, plain line items. If a
   // Subtotal and tax lines ARE legible, the true total is derivable
   // arithmetically (subtotal + tax) — far more reliable than guessing from
-  // whichever number happens to be numerically largest, which can't tell a
-  // big line item from the actual total.
+  // whichever number happens to be numerically largest.
   const subtotalLine = lines.find((line) => /\bsub[\s-]*total\b/i.test(line));
   if (subtotalLine) {
     const subtotalNumbers = [...subtotalLine.matchAll(/([\d,]+(?:\.\d{1,2})?)/g)];
@@ -583,25 +591,48 @@ const parseAmount = (text) => {
       ? Number(subtotalNumbers[subtotalNumbers.length - 1][1].replace(/,/g, ""))
       : 0;
     const taxTotal = parseTax(text);
-    if (subtotal && taxTotal) return subtotal + taxTotal;
+    if (subtotal && taxTotal) return { value: subtotal + taxTotal, confident: true };
   }
 
-  // Last resort: no label, currency symbol, or derivable subtotal+tax found
-  // at all (common on badly garbled OCR text). Prefer amounts written with
-  // cents — the standard money format on a bill — over bare whole numbers;
-  // this also stops an ID number (FSSAI/GSTIN digits/phone number) from
-  // being mistaken for the total just because it's numerically bigger.
+  // The whole summary block (Subtotal/Grand Total) can go missing entirely,
+  // not just misread — a table's shaded/differently-laid-out header and
+  // total rows can fail OCR's line segmentation altogether while plain
+  // white-background line items still read fine. When that happens, sum
+  // every line that looks like a table row (multiple decimal-formatted
+  // numbers on one line, e.g. a Rate then an Amount column) rather than
+  // picking just the single largest one — a bill with two ₹85,000 and
+  // ₹5,000 line items is closer to ₹90,000 than to either item alone, even
+  // though this still can't recover tax that was never read at all.
+  const lineItemRows = lines.filter((line) => {
+    if (taxLinePattern.test(line)) return false;
+    const decimalCount = (line.match(/\d+\.\d{1,2}/g) || []).length;
+    return decimalCount >= 2;
+  });
+  if (lineItemRows.length >= 2) {
+    const sum = lineItemRows.reduce((total, line) => {
+      const decimals = [...line.matchAll(/[\d,]+\.\d{1,2}/g)].map((match) => Number(match[0].replace(/,/g, "")));
+      return total + (decimals.length ? decimals[decimals.length - 1] : 0);
+    }, 0);
+    if (sum) return { value: sum, confident: false };
+  }
+
+  // Last resort: no label, currency symbol, derivable subtotal+tax, or
+  // multi-row line-item pattern found at all (common on badly garbled OCR
+  // text). Prefer amounts written with cents — the standard money format on
+  // a bill — over bare whole numbers; this also stops an ID number
+  // (FSSAI/GSTIN digits/phone number) from being mistaken for the total just
+  // because it's numerically bigger.
   const rawNumbers = [...text.matchAll(/[\d,]+(?:\.\d{1,2})?/g)]
     .map((match) => match[0].replace(/,/g, ""))
     .filter((raw) => Number(raw) > 0);
 
   const decimalValues = rawNumbers.filter((raw) => raw.includes(".")).map(Number);
-  if (decimalValues.length) return Math.max(...decimalValues);
+  if (decimalValues.length) return { value: Math.max(...decimalValues), confident: false };
 
   // No decimal amount anywhere — fall back to whole numbers, but cap the
   // digit count so a long ID number can't pass as a rupee amount.
   const wholeValues = rawNumbers.filter((raw) => raw.length <= 7).map(Number);
-  return wholeValues.length ? Math.max(...wholeValues) : 0;
+  return { value: wholeValues.length ? Math.max(...wholeValues) : 0, confident: false };
 };
 
 const parseTax = (text) => {
@@ -1314,8 +1345,14 @@ const extractDetails = async () => {
     fields.dateWarning.hidden = true;
   }
 
-  const amount = parseAmount(text);
-  fields.amount.value = amount ? amount : "";
+  const amountResult = parseAmount(text);
+  fields.amount.value = amountResult.value ? amountResult.value : "";
+  if (amountResult.value && !amountResult.confident) {
+    fields.amountWarning.hidden = false;
+    fields.amountWarning.textContent = `Could not find an explicit total on the bill — ${formatMoney(amountResult.value)} is an estimate from visible line items, and may be missing tax or other charges. Please verify against the bill.`;
+  } else {
+    fields.amountWarning.hidden = true;
+  }
   const tax = parseTax(text);
   fields.tax.value = tax ? tax : "";
   fields.materialItem.value = guessMaterialItem(text);

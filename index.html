@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="app-icon.png" />
-    <link rel="stylesheet" href="styles.css?v=25" />
+    <link rel="stylesheet" href="styles.css?v=26" />
   </head>
   <body>
     <div class="app-frame">
@@ -260,7 +260,7 @@
                   <label class="field">
                     <span>Date</span>
                     <input id="date" type="date" required />
-                    <small id="dateWarning" class="date-warning" hidden></small>
+                    <small id="dateWarning" class="field-warning" hidden></small>
                   </label>
                   <label class="field">
                     <span>Category</span>
@@ -276,7 +276,11 @@
                       <option>Other</option>
                     </select>
                   </label>
-                  <label class="field"><span>Amount</span><input id="amount" type="number" min="0" step="0.01" required /></label>
+                  <label class="field">
+                    <span>Amount</span>
+                    <input id="amount" type="number" min="0" step="0.01" required />
+                    <small id="amountWarning" class="field-warning" hidden></small>
+                  </label>
                   <label class="field"><span>GSTIN</span><input id="gstin" maxlength="15" /></label>
                   <label class="field"><span>Tax</span><input id="tax" type="number" min="0" step="0.01" /></label>
                   <label class="field"><span>Material Item</span><input id="materialItem" placeholder="Steel, fabric, packaging, parts" /></label>
@@ -513,7 +517,7 @@
       // Track auth mode globally
       window.currentAuthMode = 'login';
     </script>
-    <script src="app.js?v=33"></script>
+    <script src="app.js?v=34"></script>
     <script>
       // Ensure auth mode buttons work
       document.addEventListener('DOMContentLoaded', function() {

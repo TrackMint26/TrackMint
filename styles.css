@@ -1002,7 +1002,7 @@ html[data-theme="dark"] .palette span::before {
   font-weight: 800;
 }
 
-.date-warning {
+.field-warning {
   display: block;
   margin-top: -2px;
   font-size: 0.78rem;
@@ -1010,7 +1010,7 @@ html[data-theme="dark"] .palette span::before {
   color: #b87911;
 }
 
-html[data-theme="dark"] .date-warning {
+html[data-theme="dark"] .field-warning {
   color: #f4c063;
 }
 
