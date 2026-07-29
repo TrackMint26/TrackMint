@@ -537,11 +537,28 @@ const parseTaxLegacy = (text) => {
 const parseAmount = (text) => {
   const lines = normalizeLines(text);
   const taxLinePattern = /\b(?:cgst|sgst|igst|gstin|tax)\b/i;
-  const labelPattern = /(?:grand total|invoice total|total amount|amount payable|net amount|balance due|amount due|final amount|total payable|^amount\b)\D{0,30}([\d,]+(?:\.\d{1,2})?)/i;
 
+  // Strong, unambiguous "this IS the bill total" labels always take priority
+  // — checked as a full separate pass so a table's own line-item amount can
+  // never outrank the real total, regardless of which one happens to appear
+  // first/last in the OCR'd text.
+  const strongLabelPattern = /(?:grand total|invoice total|total amount|amount payable|net amount|balance due|amount due|final amount|total payable)\D{0,30}([\d,]+(?:\.\d{1,2})?)/i;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     if (taxLinePattern.test(lines[i])) continue;
-    const match = lines[i].match(labelPattern);
+    const match = lines[i].match(strongLabelPattern);
+    if (match) return Number(match[1].replace(/,/g, ""));
+  }
+
+  // Weaker fallback: a bare "Amount" label with no stronger total wording
+  // found anywhere. Excludes "Amount (₹)" / "Amount (Rs.)" specifically —
+  // that parenthesised-unit shape is how a TABLE COLUMN HEADER reads, not an
+  // actual total declaration (which reads like "Amount: 5000" or
+  // "Amount ₹5000", no parens), and was matching a line item's amount on
+  // multi-row invoices instead of the real total.
+  const weakLabelPattern = /^amount\b(?!\s*\()\D{0,30}([\d,]+(?:\.\d{1,2})?)/i;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (taxLinePattern.test(lines[i])) continue;
+    const match = lines[i].match(weakLabelPattern);
     if (match) return Number(match[1].replace(/,/g, ""));
   }
 
@@ -552,11 +569,28 @@ const parseAmount = (text) => {
     if (match) return Number(match[1].replace(/,/g, ""));
   }
 
-  // Last resort: no label or currency symbol matched at all (common on badly
-  // garbled OCR text). Prefer amounts written with cents — the standard money
-  // format on a bill — over bare whole numbers; this also stops an ID number
-  // (FSSAI/GSTIN digits/phone number) from being mistaken for the total just
-  // because it's numerically bigger.
+  // No "total"-style label was legible at all — a real, common failure mode
+  // on formal tax invoices, where the Grand Total row often sits in a
+  // shaded/highlighted cell that OCR reads worse than plain line items. If a
+  // Subtotal and tax lines ARE legible, the true total is derivable
+  // arithmetically (subtotal + tax) — far more reliable than guessing from
+  // whichever number happens to be numerically largest, which can't tell a
+  // big line item from the actual total.
+  const subtotalLine = lines.find((line) => /\bsub[\s-]*total\b/i.test(line));
+  if (subtotalLine) {
+    const subtotalNumbers = [...subtotalLine.matchAll(/([\d,]+(?:\.\d{1,2})?)/g)];
+    const subtotal = subtotalNumbers.length
+      ? Number(subtotalNumbers[subtotalNumbers.length - 1][1].replace(/,/g, ""))
+      : 0;
+    const taxTotal = parseTax(text);
+    if (subtotal && taxTotal) return subtotal + taxTotal;
+  }
+
+  // Last resort: no label, currency symbol, or derivable subtotal+tax found
+  // at all (common on badly garbled OCR text). Prefer amounts written with
+  // cents — the standard money format on a bill — over bare whole numbers;
+  // this also stops an ID number (FSSAI/GSTIN digits/phone number) from
+  // being mistaken for the total just because it's numerically bigger.
   const rawNumbers = [...text.matchAll(/[\d,]+(?:\.\d{1,2})?/g)]
     .map((match) => match[0].replace(/,/g, ""))
     .filter((raw) => Number(raw) > 0);
@@ -571,10 +605,11 @@ const parseAmount = (text) => {
 };
 
 const parseTax = (text) => {
-  // Allow an optional "(9%)" rate call-out between the label and the amount
-  // (e.g. "CGST (9%): ₹576.00") so the rate digit isn't mistaken for the amount.
-  // Rate is captured too (see cross-check below).
-  const taxPattern = /\b(cgst|sgst|igst)\b\s*(?:\(\s*([\d.]+)\s*%?\s*\))?\s*[:\-]?\s*[^\d\n]{0,20}([\d,]+(?:\.\d{1,2})?)/gi;
+  // Allow an optional "(9%)" OR "@9%" rate call-out between the label and the
+  // amount (e.g. "CGST (9%): ₹576.00" or "CGST @9% 8,100.00" — the latter is
+  // the standard notation on Indian tax invoices) so the rate digit isn't
+  // mistaken for the amount. Rate is captured too (see cross-check below).
+  const taxPattern = /\b(cgst|sgst|igst)\b\s*(?:[@(]\s*([\d.]+)\s*%\s*\)?)?\s*[:\-]?\s*[^\d\n]{0,20}([\d,]+(?:\.\d{1,2})?)/gi;
   const entries = [...text.matchAll(taxPattern)].map((match) => ({
     type: match[1].toLowerCase(),
     rate: match[2] ? Number(match[2]) : null,
