@@ -1177,47 +1177,54 @@ const lookupSupplierInfo = async (vendorName) => {
     return;
   }
 
-  // OCR text is frequently garbled and rarely matches anything as a whole
-  // string — retry with just the first word, which is usually the one part
-  // of a vendor name OCR gets right (the recognizable brand), and surface
-  // its disambiguation candidates as choices instead of guessing one answer.
-  const words = name.split(/\s+/).filter(Boolean);
+  // OCR garbling doesn't hit every word the same way — the brand word might
+  // read cleanly while a later word is mangled, or vice versa. Reading only
+  // the first word (as this used to) misses any name where OCR happened to
+  // get a LATER word right instead. So every significant word in the full
+  // name gets its own lookup, run in parallel, and every word's disambiguation
+  // candidates are pooled together before ranking — the whole name is read,
+  // not just its first token.
+  const words = significantWords(name).slice(0, 6);
   let candidates = [];
-  if (words.length > 1) {
-    const fallback = await fetchDdgTopic(words[0]);
-    if (fallback) {
-      const topicCandidates = (fallback.RelatedTopics || [])
+  if (words.length) {
+    const fallbackResults = await Promise.all(words.map((word) => fetchDdgTopic(word)));
+    const topicCandidates = [];
+    fallbackResults.forEach((fallback, index) => {
+      if (!fallback) return;
+      (fallback.RelatedTopics || [])
         .filter((topic) => topic.FirstURL && topic.Text)
-        .map(parseRelatedTopic);
+        .map(parseRelatedTopic)
+        .forEach((candidate) => topicCandidates.push(candidate));
       if (fallback.Abstract) {
-        topicCandidates.unshift({
-          heading: fallback.Heading || words[0],
+        topicCandidates.push({
+          heading: fallback.Heading || words[index],
           text: fallback.AbstractText || fallback.Abstract,
           url: fallback.AbstractURL || "",
         });
       }
-      // The candidate list comes from a single generic word (not the full
-      // vendor name), so word-overlap alone is a weak signal here — matching
-      // just "Krishna" out of "Krishna Traders" scores the same whether the
-      // result is a real trading company or, say, a religious mantra. Require
-      // an actual positive business/industry signal to even be shown, not
-      // just the absence of a known-irrelevant category.
-      const seen = new Set();
-      candidates = topicCandidates
-        .filter((candidate) => {
-          if (!candidate.heading || seen.has(candidate.heading)) return false;
-          if (isNonBusinessTopic({ Abstract: candidate.text })) return false;
-          if (!looksLikeBusiness({ Abstract: candidate.text })) return false;
-          seen.add(candidate.heading);
-          return true;
-        })
-        .sort(
-          (a, b) =>
-            supplierMatchConfidence(name, { Heading: b.heading, Abstract: b.text }).score -
-            supplierMatchConfidence(name, { Heading: a.heading, Abstract: a.text }).score
-        )
-        .slice(0, 4);
-    }
+    });
+
+    // The candidate list comes from single generic words (not the full
+    // vendor name), so word-overlap alone is a weak signal here — matching
+    // just "Krishna" out of "Krishna Traders" scores the same whether the
+    // result is a real trading company or, say, a religious mantra. Require
+    // an actual positive business/industry signal to even be shown, not
+    // just the absence of a known-irrelevant category.
+    const seen = new Set();
+    candidates = topicCandidates
+      .filter((candidate) => {
+        if (!candidate.heading || seen.has(candidate.heading)) return false;
+        if (isNonBusinessTopic({ Abstract: candidate.text })) return false;
+        if (!looksLikeBusiness({ Abstract: candidate.text })) return false;
+        seen.add(candidate.heading);
+        return true;
+      })
+      .sort(
+        (a, b) =>
+          supplierMatchConfidence(name, { Heading: b.heading, Abstract: b.text }).score -
+          supplierMatchConfidence(name, { Heading: a.heading, Abstract: a.text }).score
+      )
+      .slice(0, 4);
   }
 
   if (candidates.length) {
