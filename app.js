@@ -356,7 +356,18 @@ const fixOcrDigitConfusion = (text) =>
     return token.replace(/[Oo]/g, "0").replace(/[lI]/g, "1");
   });
 
-const GSTIN_PATTERN = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
+// The 14th character of a GSTIN is always the literal "Z" per the official
+// government format (a fixed/reserved position — every real GSTIN has it,
+// it's not something that varies between businesses like the rest of the
+// string does), but Tesseract commonly misreads it as "2" or another
+// visually similar character. Accepting any alphanumeric there and
+// correcting it back to "Z" afterward recovers GSTINs that would otherwise
+// be silently rejected as invalid by a stricter pattern.
+const GSTIN_SHAPE = "\\d{2}[A-Z]{5}\\d{4}[A-Z][A-Z\\d][A-Z\\d][A-Z\\d]";
+const GSTIN_PATTERN = new RegExp(`^${GSTIN_SHAPE}$`);
+const GSTIN_SEARCH_PATTERN = new RegExp(`\\b${GSTIN_SHAPE}\\b`, "i");
+const correctGstinChecksumLetter = (gstin) =>
+  gstin && gstin.length === 15 ? `${gstin.slice(0, 13)}Z${gstin.slice(14)}` : gstin;
 
 // OCR occasionally drops in a stray space in the middle of a GSTIN (kerning
 // artifacts, often right before the fixed "Z" checksum letter). Only merge two
@@ -744,21 +755,20 @@ const extractVendorSection = (text) => {
 const hasExplicitVendorSection = (text) => extractVendorSection(text).length > 0;
 
 const extractVendorGstin = (text) => {
-  const gstinPattern = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i;
   const vendorLines = extractVendorSection(text);
 
   // 1) Look for labeled GSTIN within vendor section
   if (vendorLines.length >= 1) {
     const gstinLabelMatch = vendorLines.find((line) => /^(?:vendor\s+gstin|supplier\s+gstin|seller\s+gstin|vender\s+gstin)\s*[:\-]?\s*(.+)$/i.test(line));
     if (gstinLabelMatch) {
-      const match = gstinLabelMatch.match(gstinPattern);
-      if (match) return match[0].toUpperCase();
+      const match = gstinLabelMatch.match(GSTIN_SEARCH_PATTERN);
+      if (match) return correctGstinChecksumLetter(match[0].toUpperCase());
     }
 
     // 2) First strict GSTIN in vendor block
     for (const line of vendorLines) {
-      const match = line.match(gstinPattern);
-      if (match) return match[0].toUpperCase();
+      const match = line.match(GSTIN_SEARCH_PATTERN);
+      if (match) return correctGstinChecksumLetter(match[0].toUpperCase());
     }
   }
 
@@ -766,22 +776,21 @@ const extractVendorGstin = (text) => {
   const compact = text.replace(/[^A-Za-z0-9]/g, "");
   const candidates = [...compact.matchAll(/[A-Za-z0-9]{15}/g)].map((m) => m[0].toUpperCase());
   for (const cand of candidates) {
-    if (/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/.test(cand)) return cand;
+    if (GSTIN_PATTERN.test(cand)) return correctGstinChecksumLetter(cand);
   }
 
   // 4) Final strict fallback anywhere in document
-  const fullMatch = text.match(gstinPattern);
-  return fullMatch ? fullMatch[0].toUpperCase() : "";
+  const fullMatch = text.match(GSTIN_SEARCH_PATTERN);
+  return fullMatch ? correctGstinChecksumLetter(fullMatch[0].toUpperCase()) : "";
 };
 
 // Find line index containing a GSTIN-like token within an array of lines (tolerant)
 const findGstinIndexInLines = (lines) => {
-  const strict = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (strict.test(line)) return i;
+    if (GSTIN_SEARCH_PATTERN.test(line)) return i;
     const compact = line.replace(/[^A-Za-z0-9]/g, "");
-    if (/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/.test(compact.toUpperCase())) return i;
+    if (GSTIN_PATTERN.test(compact.toUpperCase())) return i;
   }
   return -1;
 };
@@ -985,8 +994,8 @@ const guessVendorFromLines = (lines) => {
 const guessPhoneFromLines = (lines) => findPhoneNumber(lines.join(" "));
 
 const extractVendorGstinFromLines = (lines) => {
-  const match = lines.join(" ").match(/\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i);
-  return match ? match[0].toUpperCase() : "";
+  const match = lines.join(" ").match(GSTIN_SEARCH_PATTERN);
+  return match ? correctGstinChecksumLetter(match[0].toUpperCase()) : "";
 };
 
 const extractVendorAddress = (lines) =>
