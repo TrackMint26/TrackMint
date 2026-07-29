@@ -72,6 +72,7 @@ const fields = {
   supplierPhone: document.getElementById("supplierPhone"),
   supplierLookup: document.getElementById("supplierLookup"),
   date: document.getElementById("date"),
+  dateWarning: document.getElementById("dateWarning"),
   category: document.getElementById("category"),
   amount: document.getElementById("amount"),
   gstin: document.getElementById("gstin"),
@@ -229,6 +230,18 @@ const applyTheme = (theme) => {
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+// Dot-matrix/thermal bill photos are the hardest OCR case this app handles,
+// and character-level digit confusion in a year (e.g. "26" misread as "04")
+// produces a date-shaped string that's still wrong. Bills are realistically
+// dated close to today, not decades back, so a plausibility window catches
+// this class of error instead of silently trusting anything date-shaped.
+const isPlausibleBillDate = (isoDate) => {
+  const year = Number(String(isoDate).slice(0, 4));
+  if (!year) return false;
+  const currentYear = new Date().getFullYear();
+  return year >= currentYear - 5 && year <= currentYear + 1;
+};
 const isRawMaterial = (expense) => expense.category === "Raw Materials";
 const cleanPhone = (phone) => phone.replace(/[^\d+]/g, "");
 const getRawMaterialTotal = () =>
@@ -1256,8 +1269,18 @@ const extractDetails = async () => {
   fields.supplierLookup.innerHTML = "";
   clearNonSupplierOcrFields();
   const normalizedDate = parseDate(text);
-  if (normalizedDate) {
+  if (normalizedDate && isPlausibleBillDate(normalizedDate)) {
     fields.date.value = normalizedDate;
+    fields.dateWarning.hidden = true;
+  } else if (normalizedDate) {
+    // A date-shaped string was found but its year is implausible for a real
+    // bill — likely OCR digit confusion, not a genuinely old invoice. Don't
+    // silently trust it; default to today and flag it for a manual check.
+    fields.date.value = today();
+    fields.dateWarning.hidden = false;
+    fields.dateWarning.textContent = `OCR read the date as ${formatDisplayDate(normalizedDate)}, which looks unlikely — defaulted to today. Please check the bill and correct it.`;
+  } else {
+    fields.dateWarning.hidden = true;
   }
 
   const amount = parseAmount(text);

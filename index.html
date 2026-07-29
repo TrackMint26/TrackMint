@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="app-icon.png" />
-    <link rel="stylesheet" href="styles.css?v=24" />
+    <link rel="stylesheet" href="styles.css?v=25" />
   </head>
   <body>
     <div class="app-frame">
@@ -257,7 +257,11 @@
                 <div class="form-grid">
                   <label class="field"><span>Vendor / Supplier</span><input id="vendor" required /></label>
                   <label class="field"><span>Supplier Phone</span><input id="supplierPhone" type="tel" placeholder="Mobile number" /></label>
-                  <label class="field"><span>Date</span><input id="date" type="date" required /></label>
+                  <label class="field">
+                    <span>Date</span>
+                    <input id="date" type="date" required />
+                    <small id="dateWarning" class="date-warning" hidden></small>
+                  </label>
                   <label class="field">
                     <span>Category</span>
                     <select id="category">
@@ -509,7 +513,7 @@
       // Track auth mode globally
       window.currentAuthMode = 'login';
     </script>
-    <script src="app.js?v=30"></script>
+    <script src="app.js?v=31"></script>
     <script>
       // Ensure auth mode buttons work
       document.addEventListener('DOMContentLoaded', function() {

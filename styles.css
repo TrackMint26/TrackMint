@@ -1002,6 +1002,18 @@ html[data-theme="dark"] .palette span::before {
   font-weight: 800;
 }
 
+.date-warning {
+  display: block;
+  margin-top: -2px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #b87911;
+}
+
+html[data-theme="dark"] .date-warning {
+  color: #f4c063;
+}
+
 .password-field {
   position: relative;
 }
