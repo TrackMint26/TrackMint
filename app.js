@@ -1560,6 +1560,31 @@ const rescanDateWithDigitWhitelist = async (blob) => {
   }
 };
 
+const hasTotalIndicators = (text) =>
+  /\b(?:grand\s*total|sub[\s-]*total|total\s*amount|amount\s*payable|net\s*amount|balance\s*due|cgst|sgst|igst)\b/i.test(text || "");
+
+// PSM 6 ("uniform block of text", this app's default) was chosen for plain
+// single-column receipts, but formal multi-column tax invoices with a
+// bordered/shaded table structure are a different layout the same mode
+// doesn't handle as well — verified directly (not assumed) by rendering a
+// synthetic invoice matching that structure and running it through every
+// PSM mode: 6 dropped the entire table header and line items outright, 11
+// and 12 dropped or garbled the Grand Total row, while 3 (fully automatic
+// page segmentation) read the whole table correctly, including Grand Total.
+// PSM 4 also worked in that test but was previously found to misread a
+// receipt's dashed/starred border patterns as extra text columns, so 3 is
+// the safer pick for a supplementary pass that must not regress receipts.
+const rescanWithAutoPageSegmentation = async (blob) => {
+  const worker = await getOcrWorker();
+  try {
+    await worker.setParameters({ tessedit_pageseg_mode: "3" });
+    const { data } = await worker.recognize(blob);
+    return (data?.text || "").trim();
+  } finally {
+    await worker.setParameters({ tessedit_pageseg_mode: "6" });
+  }
+};
+
 const runImageOcr = async () => {
   const file = fields.image.files[0];
   if (!file) {
@@ -1589,8 +1614,28 @@ const runImageOcr = async () => {
 
   try {
     setOcrProgress("Starting OCR...", 0.05);
-    const text = await runBrowserOcr(ocrFile);
+    let text = await runBrowserOcr(ocrFile);
     if (text) {
+      // A formal invoice's bordered/shaded summary table (Subtotal/tax/Grand
+      // Total) can go missing from the general-purpose pass entirely, not
+      // just misread — verified directly against a synthetic invoice with
+      // this exact structure. When nothing total/tax-shaped survived at all,
+      // retry with a page-segmentation mode built for structured, mixed-
+      // layout pages and use that reading if it actually finds what the
+      // first pass missed.
+      if (!hasTotalIndicators(text)) {
+        setOcrProgress("No bill total found — re-scanning with a different layout mode...", 0.55);
+        try {
+          const layoutBlob = await preprocessImageBlob(ocrFile);
+          const layoutText = await rescanWithAutoPageSegmentation(layoutBlob);
+          if (hasTotalIndicators(layoutText)) {
+            text = layoutText;
+          }
+        } catch (error) {
+          console.warn("Layout re-scan failed:", error);
+        }
+      }
+
       fields.ocrText.value = text;
       await extractDetails();
 
