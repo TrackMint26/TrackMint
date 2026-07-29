@@ -1355,6 +1355,46 @@ th {
   color: var(--muted);
 }
 
+.confidence-badge {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: help;
+}
+
+.confidence-badge.confidence-high {
+  background: #dcf3e8;
+  color: #1f8a5c;
+}
+
+.confidence-badge.confidence-medium {
+  background: #fff4d9;
+  color: #b87911;
+}
+
+.confidence-badge.confidence-low {
+  background: #fde3df;
+  color: #c23b2c;
+}
+
+html[data-theme="dark"] .confidence-badge.confidence-high {
+  background: rgba(63, 192, 136, 0.18);
+  color: #6fe3ac;
+}
+
+html[data-theme="dark"] .confidence-badge.confidence-medium {
+  background: rgba(244, 182, 63, 0.18);
+  color: #f4c063;
+}
+
+html[data-theme="dark"] .confidence-badge.confidence-low {
+  background: rgba(226, 88, 68, 0.2);
+  color: #f39485;
+}
+
 .supplier-lookup-empty {
   background: var(--surface-soft);
   border-color: var(--line);

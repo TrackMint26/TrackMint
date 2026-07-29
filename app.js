@@ -986,6 +986,37 @@ const guessVendorWithNer = async (text) => {
 // small local suppliers, which this app honestly surfaces rather than hides.
 const searchWebUrl = (query) => `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
 
+// The lookup API has no confidence field of its own, so this measures the one
+// thing we actually can: how well the result's title matches the supplier
+// name that was searched (plus a small boost if DuckDuckGo tags it as a
+// "company"/business entity). This is a MATCH confidence — whether the result
+// is really about the searched supplier — not a claim about whether the
+// Wikipedia text itself is factually accurate.
+const significantWords = (text) =>
+  String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2 && !["the", "and", "ltd", "llp", "inc", "pvt", "private", "limited"].includes(word));
+
+const supplierMatchConfidence = (queryName, data) => {
+  const queryWords = significantWords(queryName);
+  const headingWords = new Set(significantWords(data.Heading || ""));
+  const abstractWords = new Set(significantWords(data.Abstract || ""));
+  if (!queryWords.length) return { score: 0, label: "Low", className: "confidence-low" };
+
+  const matchedInHeading = queryWords.filter((word) => headingWords.has(word)).length;
+  const matchedInAbstract = queryWords.filter((word) => abstractWords.has(word)).length;
+  let score = Math.max(matchedInHeading / queryWords.length, matchedInAbstract / queryWords.length);
+  if ((data.Entity || "").toLowerCase().includes("compan") || (data.Entity || "").toLowerCase().includes("business")) {
+    score = Math.min(1, score + 0.15);
+  }
+
+  if (score >= 0.7) return { score, label: "High", className: "confidence-high" };
+  if (score >= 0.35) return { score, label: "Medium", className: "confidence-medium" };
+  return { score, label: "Low", className: "confidence-low" };
+};
+
 const lookupSupplierInfo = async (vendorName) => {
   const name = (vendorName || "").trim();
   if (name.length < 3) {
@@ -1016,6 +1047,7 @@ const lookupSupplierInfo = async (vendorName) => {
     const summary = data.AbstractText || data.Abstract;
     const truncated = summary.length > 260 ? `${summary.slice(0, 260).trim()}...` : summary;
     const image = data.Image ? `https://duckduckgo.com${data.Image}` : "";
+    const confidence = supplierMatchConfidence(name, data);
     fields.supplierLookup.innerHTML = `
       <div class="supplier-lookup-card">
         ${image ? `<img src="${escapeHtml(image)}" alt="" />` : ""}
@@ -1025,6 +1057,9 @@ const lookupSupplierInfo = async (vendorName) => {
           <div class="supplier-lookup-meta">
             ${String(data.AbstractURL || "").startsWith("http") ? `<a href="${escapeHtml(data.AbstractURL)}" target="_blank" rel="noopener">Source: ${escapeHtml(data.AbstractSource || "Wikipedia")} &#8599;</a>` : ""}
             <span class="supplier-lookup-disclaimer">Free public lookup, not an official business/GST verification.</span>
+          </div>
+          <div class="confidence-badge ${confidence.className}" title="How closely this result's title matches the scanned supplier name — not a measure of the information's factual accuracy.">
+            Match confidence: ${confidence.label} (${Math.round(confidence.score * 100)}%)
           </div>
         </div>
       </div>
