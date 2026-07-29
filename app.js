@@ -1269,16 +1269,12 @@ const extractDetails = async () => {
   fields.supplierLookup.innerHTML = "";
   clearNonSupplierOcrFields();
   const normalizedDate = parseDate(text);
-  if (normalizedDate && isPlausibleBillDate(normalizedDate)) {
+  if (normalizedDate) {
     fields.date.value = normalizedDate;
-    fields.dateWarning.hidden = true;
-  } else if (normalizedDate) {
-    // A date-shaped string was found but its year is implausible for a real
-    // bill — likely OCR digit confusion, not a genuinely old invoice. Don't
-    // silently trust it; default to today and flag it for a manual check.
-    fields.date.value = today();
+  }
+  if (fields.date.value && !isPlausibleBillDate(fields.date.value)) {
     fields.dateWarning.hidden = false;
-    fields.dateWarning.textContent = `OCR read the date as ${formatDisplayDate(normalizedDate)}, which looks unlikely — defaulted to today. Please check the bill and correct it.`;
+    fields.dateWarning.textContent = `OCR read the date as ${formatDisplayDate(fields.date.value)}, which looks unlikely for a real bill — please double-check it.`;
   } else {
     fields.dateWarning.hidden = true;
   }
@@ -1464,6 +1460,25 @@ const runBrowserOcr = async (file) => {
   return (data?.text || "").trim();
 };
 
+// Digit/letter confusion is the dominant error mode on degraded (dot-matrix,
+// thermal, low-light) receipts — Tesseract has to choose between ~62
+// alphanumeric characters per glyph. Restricting the character set to just
+// digits and date separators removes almost all of that ambiguity for a
+// second pass, so it reads numerals noticeably more accurately than the
+// general-purpose first pass. This mutates the shared OCR worker's
+// parameters, so it MUST restore them afterward or every future normal scan
+// would silently be limited to digits too.
+const rescanDateWithDigitWhitelist = async (blob) => {
+  const worker = await getOcrWorker();
+  try {
+    await worker.setParameters({ tessedit_char_whitelist: "0123456789/-:. " });
+    const { data } = await worker.recognize(blob);
+    return (data?.text || "").trim();
+  } finally {
+    await worker.setParameters({ tessedit_char_whitelist: "" });
+  }
+};
+
 const runImageOcr = async () => {
   const file = fields.image.files[0];
   if (!file) {
@@ -1497,6 +1512,34 @@ const runImageOcr = async () => {
     if (text) {
       fields.ocrText.value = text;
       await extractDetails();
+
+      // The general-purpose OCR pass found a date, but it landed outside a
+      // plausible range for a real bill — most likely a digit misread, not
+      // a genuinely decades-old invoice. Re-scan the same image with the
+      // engine restricted to digits only, which is meaningfully more
+      // accurate for numerals, and use that reading if it actually resolves
+      // to a plausible date. This corrects the OCR reading itself rather
+      // than guessing or discarding it.
+      if (fields.date.value && !isPlausibleBillDate(fields.date.value)) {
+        const firstPassDate = fields.date.value;
+        setOcrProgress("Bill date looked unlikely — re-scanning it more closely...", 0.9);
+        try {
+          const digitBlob = await preprocessImageBlob(ocrFile);
+          const digitOnlyText = await rescanDateWithDigitWhitelist(digitBlob);
+          const rescannedDate = parseDate(digitOnlyText);
+          if (rescannedDate && isPlausibleBillDate(rescannedDate)) {
+            fields.date.value = rescannedDate;
+            fields.dateWarning.hidden = false;
+            fields.dateWarning.textContent = `Corrected via a numerals-only re-scan: first read as ${formatDisplayDate(firstPassDate)}, corrected to ${formatDisplayDate(rescannedDate)}. Please verify against the bill.`;
+          } else {
+            fields.dateWarning.hidden = false;
+            fields.dateWarning.textContent = `OCR read the date as ${formatDisplayDate(firstPassDate)}, which looks unlikely for a real bill, and a closer re-scan couldn't confirm a better reading — please check the bill and correct it manually.`;
+          }
+        } catch (error) {
+          console.warn("Digit-only date rescan failed:", error);
+        }
+      }
+
       setOcrProgress("OCR complete. Supplier details extracted.", 1);
       return;
     }
