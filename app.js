@@ -70,6 +70,7 @@ const fields = {
   nerStatus: document.getElementById("nerStatus"),
   vendor: document.getElementById("vendor"),
   supplierPhone: document.getElementById("supplierPhone"),
+  supplierLookup: document.getElementById("supplierLookup"),
   date: document.getElementById("date"),
   category: document.getElementById("category"),
   amount: document.getElementById("amount"),
@@ -151,6 +152,9 @@ const isOwner = () => !!state.user?.isOwner;
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(Number(value) || 0);
+
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 
 // Expenses are stored as ISO "YYYY-MM-DD" (required by the native <input type="date">
 // element) but displayed as DD-MM-YYYY everywhere else in the app.
@@ -974,6 +978,72 @@ const guessVendorWithNer = async (text) => {
   return org ? org.word.trim() : "";
 };
 
+// Best-effort, free, keyless supplier lookup via DuckDuckGo's Instant Answer
+// API (which sources its Abstract field from Wikipedia). No API key, no
+// backend — a plain client-side fetch, same "free/local first" pattern as
+// the rest of this app's AI features. Coverage is real but limited: it finds
+// large/known companies (has a Wikipedia entry) and returns nothing for most
+// small local suppliers, which this app honestly surfaces rather than hides.
+const searchWebUrl = (query) => `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+
+const lookupSupplierInfo = async (vendorName) => {
+  const name = (vendorName || "").trim();
+  if (name.length < 3) {
+    fields.supplierLookup.hidden = true;
+    fields.supplierLookup.innerHTML = "";
+    return;
+  }
+
+  fields.supplierLookup.hidden = false;
+  fields.supplierLookup.innerHTML = `<p class="supplier-lookup-status">Checking free public sources for "${escapeHtml(name)}"...</p>`;
+
+  let data = null;
+  try {
+    const response = await fetch(
+      `https://api.duckduckgo.com/?q=${encodeURIComponent(name)}&format=json&no_html=1&skip_disambig=1`
+    );
+    if (response.ok) {
+      data = await response.json();
+    }
+  } catch (error) {
+    console.warn("Supplier lookup failed:", error);
+  }
+
+  // Only trust the DuckDuckGo/Wikipedia abstract for name matches that read as company results are not
+  // guaranteed, so we just check the Abstract text exists.
+  if (data && data.Abstract) {
+    const heading = data.Heading || name;
+    const summary = data.AbstractText || data.Abstract;
+    const truncated = summary.length > 260 ? `${summary.slice(0, 260).trim()}...` : summary;
+    const image = data.Image ? `https://duckduckgo.com${data.Image}` : "";
+    fields.supplierLookup.innerHTML = `
+      <div class="supplier-lookup-card">
+        ${image ? `<img src="${escapeHtml(image)}" alt="" />` : ""}
+        <div>
+          <strong>${escapeHtml(heading)}</strong>
+          <p>${escapeHtml(truncated)}</p>
+          <div class="supplier-lookup-meta">
+            ${String(data.AbstractURL || "").startsWith("http") ? `<a href="${escapeHtml(data.AbstractURL)}" target="_blank" rel="noopener">Source: ${escapeHtml(data.AbstractSource || "Wikipedia")} &#8599;</a>` : ""}
+            <span class="supplier-lookup-disclaimer">Free public lookup, not an official business/GST verification.</span>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    fields.supplierLookup.innerHTML = `
+      <div class="supplier-lookup-card supplier-lookup-empty">
+        <div>
+          <strong>No public info found for "${escapeHtml(name)}"</strong>
+          <p>This is common for small/local suppliers that don't have an online presence indexed by the free lookup.</p>
+          <div class="supplier-lookup-meta">
+            <a href="${escapeHtml(searchWebUrl(name))}" target="_blank" rel="noopener">Search the web instead &#8599;</a>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+};
+
 const extractDetails = async () => {
   const raw = fields.ocrText.value || "";
   const text = normalizeOcrText(raw.trim());
@@ -982,6 +1052,8 @@ const extractDetails = async () => {
     return;
   }
   fields.nerStatus.hidden = true;
+  fields.supplierLookup.hidden = true;
+  fields.supplierLookup.innerHTML = "";
   clearNonSupplierOcrFields();
   const normalizedDate = parseDate(text);
   if (normalizedDate) {
@@ -1029,6 +1101,8 @@ const extractDetails = async () => {
       fields.nerStatus.hidden = true;
     }
   }
+
+  lookupSupplierInfo(fields.vendor.value);
 };
 
 const dataURLToBlob = (dataURL) => {

@@ -1294,6 +1294,85 @@ th {
   color: var(--accent);
 }
 
+.supplier-lookup {
+  margin-bottom: 14px;
+}
+
+.supplier-lookup-status {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.supplier-lookup-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid #cfe0f5;
+  background: #e8f1fb;
+}
+
+.supplier-lookup-card img {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.supplier-lookup-card strong {
+  display: block;
+  color: var(--ink);
+}
+
+.supplier-lookup-card p {
+  margin: 4px 0 8px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.supplier-lookup-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+}
+
+.supplier-lookup-meta a {
+  color: #2e6ea6;
+  font-weight: 700;
+}
+
+.supplier-lookup-disclaimer {
+  color: var(--muted);
+}
+
+.supplier-lookup-empty {
+  background: var(--surface-soft);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .supplier-lookup-card {
+  background: rgba(46, 110, 166, 0.16);
+  border-color: rgba(46, 110, 166, 0.4);
+}
+
+html[data-theme="dark"] .supplier-lookup-card strong {
+  color: #f8f4fd;
+}
+
+html[data-theme="dark"] .supplier-lookup-meta a {
+  color: #7fb4e0;
+}
+
 .upi-pay-section {
   display: grid;
   gap: 12px;
