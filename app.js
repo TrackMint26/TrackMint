@@ -1004,12 +1004,40 @@ const significantWords = (text) =>
 // can't tell a real company apart from an unrelated topic that merely shares
 // one word (e.g. "Secure Shell" the network protocol vs "Shell plc" the fuel
 // company, for a query starting with "Shell"). This text-based hint fills
-// that gap for the candidate-list path.
+// that gap for the candidate-list path. Since the underlying data is sourced
+// from Wikipedia, which skews heavily toward films/celebrities/sports for any
+// common word, this also explicitly penalizes those sectors — Track Mint's
+// suppliers are businesses, not movies, so a film sharing a word with a
+// vendor name should rank below (or be dropped in favor of) an actual company.
 const BUSINESS_HINT_WORDS = [
   "company", "corporation", "plc", "multinational", "enterprise", "enterprises", "retailer", "retail",
   "headquartered", "founded", "manufactur", "supplier", "traders", "industries", "group", "chain",
-  "franchise", "dealership", "petrol", "fuel", "store", "shop",
+  "franchise", "dealership", "petrol", "fuel", "store", "shop", "distributor", "wholesaler", "exporter",
+  "importer", "hardware", "textile", "chemicals", "electronics", "engineering", "construction",
+  "logistics", "packaging", "machinery", "components", "spare parts", "raw material", "msme", "sme",
 ];
+const NON_BUSINESS_SECTOR_WORDS = [
+  // Entertainment / media
+  "film", "movie", "actor", "actress", "singer", "musician", "album", "song", "television series",
+  "tv series", "novel", "video game", "wrestler", "band", "celebrity", "filmmaker", "rapper", "comedian",
+  "anime", "web series",
+  // Sports
+  "footballer", "cricketer", "athlete", "football club", "cricket club", "sports club", "national team",
+  "olympic", "tournament", "hockey club", "basketball club",
+  // Religion / mythology
+  "deity", "hinduism", "mythology", "goddess", "temple dedicated", "sacred",
+  // Geography
+  "country in", "state in", "city in", "district in", "river in", "village in", "island in", "capital of",
+  // Politics / history
+  "emperor", "dynasty", "empire", "political party", "prime minister", "president of",
+  // Unrelated technical/academic topics (protocols, languages, etc.)
+  "protocol", "programming language", "operating system", "algorithm",
+];
+const isNonBusinessTopic = (data) => {
+  const entity = (data.Entity || "").toLowerCase();
+  const text = (data.Abstract || "").toLowerCase();
+  return NON_BUSINESS_SECTOR_WORDS.some((word) => entity.includes(word) || text.includes(word));
+};
 const looksLikeBusiness = (data) => {
   const entity = (data.Entity || "").toLowerCase();
   if (entity.includes("compan") || entity.includes("business")) return true;
@@ -1028,6 +1056,9 @@ const supplierMatchConfidence = (queryName, data) => {
   let score = Math.max(matchedInHeading / queryWords.length, matchedInAbstract / queryWords.length);
   if (looksLikeBusiness(data)) {
     score = Math.min(1, score + 0.15);
+  }
+  if (isNonBusinessTopic(data)) {
+    score = Math.max(0, score - 0.4);
   }
 
   if (score >= 0.7) return { score, label: "High", className: "confidence-high" };
@@ -1141,7 +1172,7 @@ const lookupSupplierInfo = async (vendorName) => {
   fields.supplierLookup.innerHTML = `<p class="supplier-lookup-status">Checking free public sources for "${escapeHtml(name)}"...</p>`;
 
   const primary = await fetchDdgTopic(name, { skipDisambig: true });
-  if (primary && primary.Abstract) {
+  if (primary && primary.Abstract && !isNonBusinessTopic(primary)) {
     renderSupplierCard(name, primary);
     return;
   }
@@ -1165,10 +1196,18 @@ const lookupSupplierInfo = async (vendorName) => {
           url: fallback.AbstractURL || "",
         });
       }
+      // The candidate list comes from a single generic word (not the full
+      // vendor name), so word-overlap alone is a weak signal here — matching
+      // just "Krishna" out of "Krishna Traders" scores the same whether the
+      // result is a real trading company or, say, a religious mantra. Require
+      // an actual positive business/industry signal to even be shown, not
+      // just the absence of a known-irrelevant category.
       const seen = new Set();
       candidates = topicCandidates
         .filter((candidate) => {
           if (!candidate.heading || seen.has(candidate.heading)) return false;
+          if (isNonBusinessTopic({ Abstract: candidate.text })) return false;
+          if (!looksLikeBusiness({ Abstract: candidate.text })) return false;
           seen.add(candidate.heading);
           return true;
         })
