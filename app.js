@@ -386,6 +386,60 @@ const fixSplitGstin = (text) =>
 const fixCurrencySymbol = (text) =>
   text.replace(/(?<![A-Za-z0-9])[?fT€£¥](?=\d[\d,]*\.\d{2}\b)/g, "₹");
 
+// Same problem fixCurrencySymbol solves above, but for the harder case:
+// Tesseract merging "₹" into a literal leading DIGIT glued onto the amount
+// instead of a distinguishable stand-in character (e.g. "₹6,400.00" read as
+// "76,400.00"). A "7" is a valid digit on its own, so this can only be
+// caught by checking the number against another value on the same bill
+// that's independently derivable — reuses the same cross-validation
+// primitives parseAmount/parseTax use downstream for the parsed VALUES
+// (defined further down this file; safe to reference here since this only
+// runs when normalizeOcrText is actually called, well after the whole
+// module has loaded), so what the user sees in the OCR text box itself
+// reads correctly too, not just the fields extracted from it.
+const fixMisreadCurrencyDigitInText = (text) => {
+  const lines = text.split(/\r?\n/);
+  const taxLinePattern = /\b(?:cgst|sgst|igst|gstin|tax)\b/i;
+  const plainLines = lines.map((line) => line.trim()).filter(Boolean);
+  const lineItemTotal = sumLineItemAmounts(plainLines, taxLinePattern);
+
+  const replaceTrailingNumber = (line, expectedValue) => {
+    if (!expectedValue) return line;
+    const match = line.match(/([\d,]+(?:\.\d{1,2})?)\s*$/);
+    if (!match) return line;
+    const raw = match[1];
+    if (raw.replace(/,/g, "").length < 2) return line;
+    const stripped = Number(raw.replace(/,/g, "").slice(1));
+    if (Math.abs(stripped - expectedValue) >= 0.01) return line;
+    return line.slice(0, match.index) + "₹" + raw.slice(1);
+  };
+
+  const subtotalLabel = /\bsub[\s-]*total\b/i;
+  const subtotalLineIdx = lines.findIndex((line) => subtotalLabel.test(line));
+  let subtotalGuess = 0;
+  if (subtotalLineIdx >= 0) {
+    const numberMatch = lines[subtotalLineIdx].match(/([\d,]+(?:\.\d{1,2})?)\s*$/);
+    if (numberMatch) subtotalGuess = stripLikelyMisreadLeadingDigit(numberMatch[1], lineItemTotal);
+  }
+  const taxTotal = subtotalGuess ? parseTax(text, subtotalGuess) : 0;
+  const grandTotalLabel = /(?:grand total|invoice total|total amount|amount payable|net amount|balance due|amount due|final amount|total payable)/i;
+  const taxRatePattern = /\b(?:cgst|sgst|igst)\b\s*(?:[@(]\s*([\d.]+)\s*%\s*\)?)?/i;
+
+  return lines
+    .map((line) => {
+      if (subtotalLabel.test(line)) return replaceTrailingNumber(line, lineItemTotal);
+      const rateMatch = line.match(taxRatePattern);
+      if (rateMatch && rateMatch[1] && subtotalGuess) {
+        return replaceTrailingNumber(line, (Number(rateMatch[1]) / 100) * subtotalGuess);
+      }
+      if (grandTotalLabel.test(line) && !taxLinePattern.test(line) && subtotalGuess && taxTotal) {
+        return replaceTrailingNumber(line, subtotalGuess + taxTotal);
+      }
+      return line;
+    })
+    .join("\n");
+};
+
 // Additional normalization to fix common OCR artifacts before parsing
 const normalizeOcrText = (text) => {
   if (!text) return "";
@@ -412,6 +466,9 @@ const normalizeOcrText = (text) => {
   t = fixSplitGstin(t);
   // Fix mangled rupee symbol in front of money amounts
   t = fixCurrencySymbol(t);
+  // Catch the harder case: "₹" merged into a literal leading digit rather
+  // than a distinguishable stand-in character (handled just above).
+  t = fixMisreadCurrencyDigitInText(t);
   // Remove only control characters, preserve currency symbols and Unicode text
   t = t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
   return t;
@@ -1435,6 +1492,10 @@ const extractDetails = async () => {
     alert("Paste bill text or use the sample bill first.");
     return;
   }
+  // Show the corrected text, not just use it internally — otherwise the OCR
+  // box still displays misread currency symbols/digits even though the
+  // parsed fields below are already reading the fixed version.
+  fields.ocrText.value = text;
   fields.nerStatus.hidden = true;
   fields.supplierLookup.hidden = true;
   fields.supplierLookup.innerHTML = "";
