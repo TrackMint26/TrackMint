@@ -1316,11 +1316,11 @@ const lookupSupplierInfo = async (vendorName) => {
     // The candidate list comes from single generic words (not the full
     // vendor name), so word-overlap alone is a weak signal here — matching
     // just "Krishna" out of "Krishna Traders" scores the same whether the
-    // result is a real trading company or, say, a religious mantra. Require
-    // an actual positive business/industry signal to even be shown, not
-    // just the absence of a known-irrelevant category.
+    // result is a real trading company or, say, a religious mantra. A cheap
+    // pre-filter narrows to plausible candidates first (business-hint text,
+    // no known-irrelevant category, top-scoring by word overlap).
     const seen = new Set();
-    candidates = topicCandidates
+    const preFiltered = topicCandidates
       .filter((candidate) => {
         if (!candidate.heading || seen.has(candidate.heading)) return false;
         if (isNonBusinessTopic({ Abstract: candidate.text })) return false;
@@ -1328,6 +1328,44 @@ const lookupSupplierInfo = async (vendorName) => {
         seen.add(candidate.heading);
         return true;
       })
+      .sort(
+        (a, b) =>
+          supplierMatchConfidence(name, { Heading: b.heading, Abstract: b.text }).score -
+          supplierMatchConfidence(name, { Heading: a.heading, Abstract: a.text }).score
+      )
+      .slice(0, 6);
+
+    // RelatedTopics entries don't carry their own Entity field, so that
+    // cheap text heuristic alone can't tell a real company apart from a
+    // generic encyclopedia concept that merely uses business-adjacent
+    // vocabulary — e.g. "Materiel" (a military-logistics TERM, not a
+    // company) surfaced from searching "Supplies" alone, since its
+    // description mentions "supply-chain management". Verified via direct
+    // API calls: a dedicated lookup of a candidate's own heading DOES return
+    // a structured Entity field ("company" for every real business tested —
+    // Tata Steel, Shell plc, Mohan Meakin — vs. empty for Materiel), so each
+    // pre-filtered candidate gets that one extra verification call before
+    // being shown at all.
+    const verified = await Promise.all(
+      preFiltered.map(async (candidate) => {
+        const ownTopic = await fetchDdgTopic(candidate.heading, { skipDisambig: true });
+        const entity = (ownTopic?.Entity || "").toLowerCase();
+        // No fallback to the text heuristic here on purpose — that's the
+        // exact check that let "Materiel" through in the first place (its
+        // description mentions "supply-chain", which matches this file's own
+        // business-hint word list). An empty Entity from a dedicated,
+        // disambiguated lookup is itself real evidence this isn't a company,
+        // not an inconclusive result to paper over — every verified real
+        // business tested (Shell plc, Mohan Meakin, Tata Steel, TCS) reliably
+        // returns Entity "company" from this same kind of lookup.
+        const isVerifiedBusiness =
+          entity.includes("compan") || entity.includes("business") || entity.includes("organis") || entity.includes("organiz") || entity.includes("brand");
+        return isVerifiedBusiness ? candidate : null;
+      })
+    );
+
+    candidates = verified
+      .filter(Boolean)
       .sort(
         (a, b) =>
           supplierMatchConfidence(name, { Heading: b.heading, Abstract: b.text }).score -
