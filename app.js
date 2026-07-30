@@ -553,19 +553,58 @@ const parseTaxLegacy = (text) => {
 // best-effort estimate that could be missing tax or other line items — the
 // caller should surface that distinction rather than presenting a guess
 // with the same confidence as a confirmed reading.
+// Sum of amounts on lines that look like table rows (2+ decimal-formatted
+// numbers, e.g. a Rate then an Amount column) — used as an Amount-field
+// fallback when no total is found at all, AND as an independent reference
+// value to sanity-check the Subtotal/Grand Total figures against.
+const sumLineItemAmounts = (lines, taxLinePattern) => {
+  const rows = lines.filter((line) => {
+    if (taxLinePattern.test(line)) return false;
+    const decimalCount = (line.match(/\d+\.\d{1,2}/g) || []).length;
+    return decimalCount >= 2;
+  });
+  return rows.reduce((total, line) => {
+    const decimals = [...line.matchAll(/[\d,]+\.\d{1,2}/g)].map((match) => Number(match[0].replace(/,/g, "")));
+    return total + (decimals.length ? decimals[decimals.length - 1] : 0);
+  }, 0);
+};
+
+// Tesseract doesn't always substitute a distinguishable stand-in character
+// for "₹" (handled by fixCurrencySymbol above) — sometimes it merges the
+// symbol into a literal leading DIGIT glued onto the amount instead, e.g.
+// "₹6,400.00" read as "76,400.00". A "7" is a perfectly valid digit on its
+// own, so this can only be caught by checking whether the number makes
+// arithmetic sense against another value that's independently derivable
+// from the same bill — if stripping one leading digit brings the number
+// back in line with that reference, the leading digit was almost certainly
+// a misread currency symbol, not a real part of the amount.
+const stripLikelyMisreadLeadingDigit = (rawString, expectedValue) => {
+  const digits = String(rawString || "").replace(/,/g, "");
+  const asIs = Number(digits);
+  if (!expectedValue || Math.abs(asIs - expectedValue) < 0.01 || digits.length < 2) return asIs;
+  const stripped = Number(digits.slice(1));
+  return Math.abs(stripped - expectedValue) < 0.01 ? stripped : asIs;
+};
+
 const parseAmount = (text) => {
   const lines = normalizeLines(text);
   const taxLinePattern = /\b(?:cgst|sgst|igst|gstin|tax)\b/i;
+  const lineItemTotal = sumLineItemAmounts(lines, taxLinePattern);
 
   // Strong, unambiguous "this IS the bill total" labels always take priority
   // — checked as a full separate pass so a table's own line-item amount can
   // never outrank the real total, regardless of which one happens to appear
-  // first/last in the OCR'd text.
+  // first/last in the OCR'd text. When the bill's own line items and tax are
+  // independently legible, cross-check the matched total against their sum
+  // in case the label's own number has a misread-currency-symbol digit.
   const strongLabelPattern = /(?:grand total|invoice total|total amount|amount payable|net amount|balance due|amount due|final amount|total payable)\D{0,30}([\d,]+(?:\.\d{1,2})?)/i;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     if (taxLinePattern.test(lines[i])) continue;
     const match = lines[i].match(strongLabelPattern);
-    if (match) return { value: Number(match[1].replace(/,/g, "")), confident: true };
+    if (match) {
+      const expectedTotal = lineItemTotal ? lineItemTotal + parseTax(text, lineItemTotal) : 0;
+      return { value: stripLikelyMisreadLeadingDigit(match[1], expectedTotal), confident: true };
+    }
   }
 
   // Weaker fallback: a bare "Amount" label with no stronger total wording
@@ -594,14 +633,15 @@ const parseAmount = (text) => {
   // OCR reads worse than, or drops entirely versus, plain line items. If a
   // Subtotal and tax lines ARE legible, the true total is derivable
   // arithmetically (subtotal + tax) — far more reliable than guessing from
-  // whichever number happens to be numerically largest.
+  // whichever number happens to be numerically largest. Cross-check the
+  // Subtotal's own raw number against the line-item sum too, same reasoning
+  // as the Grand Total check above.
   const subtotalLine = lines.find((line) => /\bsub[\s-]*total\b/i.test(line));
   if (subtotalLine) {
     const subtotalNumbers = [...subtotalLine.matchAll(/([\d,]+(?:\.\d{1,2})?)/g)];
-    const subtotal = subtotalNumbers.length
-      ? Number(subtotalNumbers[subtotalNumbers.length - 1][1].replace(/,/g, ""))
-      : 0;
-    const taxTotal = parseTax(text);
+    const rawSubtotal = subtotalNumbers.length ? subtotalNumbers[subtotalNumbers.length - 1][1] : "";
+    const subtotal = rawSubtotal ? stripLikelyMisreadLeadingDigit(rawSubtotal, lineItemTotal) : 0;
+    const taxTotal = parseTax(text, subtotal);
     if (subtotal && taxTotal) return { value: subtotal + taxTotal, confident: true };
   }
 
@@ -614,18 +654,7 @@ const parseAmount = (text) => {
   // picking just the single largest one — a bill with two ₹85,000 and
   // ₹5,000 line items is closer to ₹90,000 than to either item alone, even
   // though this still can't recover tax that was never read at all.
-  const lineItemRows = lines.filter((line) => {
-    if (taxLinePattern.test(line)) return false;
-    const decimalCount = (line.match(/\d+\.\d{1,2}/g) || []).length;
-    return decimalCount >= 2;
-  });
-  if (lineItemRows.length >= 2) {
-    const sum = lineItemRows.reduce((total, line) => {
-      const decimals = [...line.matchAll(/[\d,]+\.\d{1,2}/g)].map((match) => Number(match[0].replace(/,/g, "")));
-      return total + (decimals.length ? decimals[decimals.length - 1] : 0);
-    }, 0);
-    if (sum) return { value: sum, confident: false };
-  }
+  if (lineItemTotal) return { value: lineItemTotal, confident: false };
 
   // Last resort: no label, currency symbol, derivable subtotal+tax, or
   // multi-row line-item pattern found at all (common on badly garbled OCR
@@ -646,17 +675,25 @@ const parseAmount = (text) => {
   return { value: wholeValues.length ? Math.max(...wholeValues) : 0, confident: false };
 };
 
-const parseTax = (text) => {
+const parseTax = (text, subtotalHint) => {
   // Allow an optional "(9%)" OR "@9%" rate call-out between the label and the
   // amount (e.g. "CGST (9%): ₹576.00" or "CGST @9% 8,100.00" — the latter is
   // the standard notation on Indian tax invoices) so the rate digit isn't
   // mistaken for the amount. Rate is captured too (see cross-check below).
   const taxPattern = /\b(cgst|sgst|igst)\b\s*(?:[@(]\s*([\d.]+)\s*%\s*\)?)?\s*[:\-]?\s*[^\d\n]{0,20}([\d,]+(?:\.\d{1,2})?)/gi;
-  const entries = [...text.matchAll(taxPattern)].map((match) => ({
-    type: match[1].toLowerCase(),
-    rate: match[2] ? Number(match[2]) : null,
-    value: Number(match[3].replace(/,/g, "")),
-  }));
+  const entries = [...text.matchAll(taxPattern)].map((match) => {
+    const rate = match[2] ? Number(match[2]) : null;
+    // When a subtotal is independently known and this line states its own
+    // rate, the expected tax amount (rate% of subtotal) is a strong
+    // reference to catch the same misread-leading-digit problem here too —
+    // e.g. "CGST (9%): 3576.00" for a true "₹576.00" on a ₹6,400 subtotal.
+    const expected = subtotalHint && rate ? (rate / 100) * subtotalHint : 0;
+    return {
+      type: match[1].toLowerCase(),
+      rate,
+      value: stripLikelyMisreadLeadingDigit(match[3], expected),
+    };
+  });
   if (entries.length) {
     // CGST and SGST are always levied at the same rate on the same base for
     // intra-state supply. Tesseract occasionally misreads the ₹ symbol as a
@@ -1421,7 +1458,8 @@ const extractDetails = async () => {
   } else {
     fields.amountWarning.hidden = true;
   }
-  const tax = parseTax(text);
+  const lineItemTotalForTax = sumLineItemAmounts(normalizeLines(text), /\b(?:cgst|sgst|igst|gstin|tax)\b/i);
+  const tax = parseTax(text, lineItemTotalForTax || undefined);
   fields.tax.value = tax ? tax : "";
   fields.materialItem.value = guessMaterialItem(text);
   fields.quantity.value = guessQuantity(text);
