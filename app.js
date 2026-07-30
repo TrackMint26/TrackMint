@@ -1265,6 +1265,27 @@ const lookupSupplierInfo = async (vendorName) => {
     return;
   }
 
+  // The exact full name rarely matches (a legal-entity-style name is often
+  // just not itself a distinct organization DuckDuckGo knows), but a
+  // progressively shorter PREFIX of it often does — and stays much closer to
+  // the actual searched name than jumping straight to a single word. E.g.
+  // for "Tata Steel Processing and Distribution Ltd", "Tata Steel" alone
+  // correctly finds the real Tata Steel Limited, which is a far more
+  // specific and relevant match than "Tata" alone matching only the much
+  // broader, less specific "Tata Group" — verified via direct API calls
+  // before writing this, not assumed. Tried longest-prefix-first, and
+  // sequentially (not in parallel) so it can stop at the first, most
+  // specific hit instead of firing every shorter prefix unnecessarily.
+  const prefixWords = significantWords(name);
+  for (let take = prefixWords.length - 1; take >= 2; take -= 1) {
+    const phrase = prefixWords.slice(0, take).join(" ");
+    const prefixResult = await fetchDdgTopic(phrase, { skipDisambig: true });
+    if (prefixResult && prefixResult.Abstract && !isNonBusinessTopic(prefixResult)) {
+      renderSupplierCard(name, prefixResult);
+      return;
+    }
+  }
+
   // OCR garbling doesn't hit every word the same way — the brand word might
   // read cleanly while a later word is mangled, or vice versa. Reading only
   // the first word (as this used to) misses any name where OCR happened to
