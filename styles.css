@@ -564,62 +564,82 @@ html[data-theme="dark"] .palette span::before {
    app's own surfaces — light and dark each pass the lightness band, chroma
    floor, CVD separation, normal-vision floor and 3:1 contrast checks. */
 .metric-spend {
-  --metric-color: #6a3fd1;
+  --metric-color: #0FA3A3;
 }
 
 .metric-gst {
-  --metric-color: #d55181;
+  --metric-color: #5B3FD1;
 }
 
 .metric-raw {
-  --metric-color: #2a78d6;
+  --metric-color: #E8437B;
 }
 
 .metric-pending {
-  --metric-color: #c2790f;
+  --metric-color: #A85C00;
 }
 
 .metric-approved {
-  --metric-color: #22a06b;
+  --metric-color: #3ACB74;
 }
 
 .metric-suppliers {
-  --metric-color: #eb6834;
+  --metric-color: #1573E6;
 }
 
 html[data-theme="dark"] .metric-spend {
-  --metric-color: #9085e9;
+  --metric-color: #17A0A0;
 }
 
 html[data-theme="dark"] .metric-gst {
-  --metric-color: #d55181;
+  --metric-color: #7C63E8;
 }
 
 html[data-theme="dark"] .metric-raw {
-  --metric-color: #3987e5;
+  --metric-color: #E05186;
 }
 
 html[data-theme="dark"] .metric-pending {
-  --metric-color: #c98500;
+  --metric-color: #C97A0F;
 }
 
 html[data-theme="dark"] .metric-approved {
-  --metric-color: #199e70;
+  --metric-color: #23A85C;
 }
 
 html[data-theme="dark"] .metric-suppliers {
-  --metric-color: #d95926;
+  --metric-color: #3D8FE8;
+}
+
+/* iOS-home-screen treatment: a gradient-filled squircle with a glossy top
+   edge, a soft inner floor shadow, and a coloured drop shadow lifting it off
+   the card — the depth cue phone app icons use. Every layer is derived from
+   the one --*-color token via color-mix, so a hue change needs one edit. */
+.metric-icon,
+.procedure-step.complete span,
+.procedure-step.active span {
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--tile-color) 72%, #ffffff) 0%,
+    var(--tile-color) 52%,
+    color-mix(in srgb, var(--tile-color) 80%, #000000) 100%
+  );
+  color: #fff;
+  box-shadow:
+    0 5px 12px -3px color-mix(in srgb, var(--tile-color) 55%, transparent),
+    0 2px 4px -1px color-mix(in srgb, var(--tile-color) 35%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.14);
 }
 
 .metric-icon {
+  --tile-color: var(--metric-color, var(--primary));
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   margin-bottom: 12px;
   place-items: center;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--metric-color, var(--primary)) 15%, transparent);
-  color: var(--metric-color, var(--primary));
+  border-radius: 11px;
 }
 
 .metric-icon svg {
@@ -673,52 +693,53 @@ html[data-theme="dark"] .metric-suppliers {
    chart series, and reusing them here would imply a relationship between a
    step and a spend category that doesn't exist. */
 .step-icon-capture {
-  --step-color: #6a3fd1;
+  --step-color: #3ACB74;
 }
 
 .step-icon-classify {
-  --step-color: #2e6ea6;
+  --step-color: #5B3FD1;
 }
 
 .step-icon-check {
-  --step-color: #1f8a5c;
+  --step-color: #E8437B;
 }
 
 .step-icon-analyze {
-  --step-color: #c2790f;
+  --step-color: #1573E6;
 }
 
 .step-icon-alert {
-  --step-color: #c23b2c;
+  --step-color: #E5484D;
 }
 
 html[data-theme="dark"] .step-icon-capture {
-  --step-color: #b79cf7;
+  --step-color: #23A85C;
 }
 
 html[data-theme="dark"] .step-icon-classify {
-  --step-color: #7fb4e0;
+  --step-color: #7C63E8;
 }
 
 html[data-theme="dark"] .step-icon-check {
-  --step-color: #3fc088;
+  --step-color: #E05186;
 }
 
 html[data-theme="dark"] .step-icon-analyze {
-  --step-color: #f4c063;
+  --step-color: #3D8FE8;
 }
 
 html[data-theme="dark"] .step-icon-alert {
-  --step-color: #f39485;
+  --step-color: #E05C5C;
 }
 
 .procedure-step span {
+  --tile-color: var(--step-color, var(--primary));
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   grid-row: span 2;
   place-items: center;
-  border-radius: 999px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--step-color, var(--primary)) 14%, transparent);
   color: var(--step-color, var(--ink));
   font-weight: 800;
@@ -755,10 +776,6 @@ html[data-theme="dark"] .step-icon-alert {
   color: #fff;
 }
 
-html[data-theme="dark"] .procedure-step.complete span,
-html[data-theme="dark"] .procedure-step.active span {
-  color: #150f24;
-}
 
 .insight-panel {
   min-height: 360px;
@@ -1938,8 +1955,9 @@ html[data-theme="dark"] .chart-label {
   }
 
   .procedure-step span {
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
     font-size: 0.72rem;
   }
 
@@ -1953,10 +1971,10 @@ html[data-theme="dark"] .chart-label {
   }
 
   .metric-icon {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     margin-bottom: 9px;
-    border-radius: 8px;
+    border-radius: 9px;
   }
 
   .metric-icon svg {
