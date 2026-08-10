@@ -594,6 +594,53 @@ html[data-theme="dark"] .palette span::before {
   color: var(--muted);
 }
 
+/* Each workflow step carries its own hue so the row reads as five distinct
+   stages at a glance. The colours are the ones already in this app's
+   palette (brand violet, link blue, accent green, warning amber, alert red)
+   rather than new arbitrary ones, so the row still looks native to the rest
+   of the UI. Deliberately NOT the --series-N chart colours: those identify
+   chart series, and reusing them here would imply a relationship between a
+   step and a spend category that doesn't exist. */
+.step-icon-capture {
+  --step-color: #6a3fd1;
+}
+
+.step-icon-classify {
+  --step-color: #2e6ea6;
+}
+
+.step-icon-check {
+  --step-color: #1f8a5c;
+}
+
+.step-icon-analyze {
+  --step-color: #c2790f;
+}
+
+.step-icon-alert {
+  --step-color: #c23b2c;
+}
+
+html[data-theme="dark"] .step-icon-capture {
+  --step-color: #b79cf7;
+}
+
+html[data-theme="dark"] .step-icon-classify {
+  --step-color: #7fb4e0;
+}
+
+html[data-theme="dark"] .step-icon-check {
+  --step-color: #3fc088;
+}
+
+html[data-theme="dark"] .step-icon-analyze {
+  --step-color: #f4c063;
+}
+
+html[data-theme="dark"] .step-icon-alert {
+  --step-color: #f39485;
+}
+
 .procedure-step span {
   display: grid;
   width: 30px;
@@ -601,9 +648,14 @@ html[data-theme="dark"] .palette span::before {
   grid-row: span 2;
   place-items: center;
   border-radius: 999px;
-  background: var(--surface-soft);
-  color: var(--ink);
+  background: color-mix(in srgb, var(--step-color, var(--primary)) 14%, transparent);
+  color: var(--step-color, var(--ink));
   font-weight: 800;
+}
+
+.procedure-step span svg {
+  width: 16px;
+  height: 16px;
 }
 
 .procedure-step strong {
@@ -623,10 +675,18 @@ html[data-theme="dark"] .palette span::before {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
+/* Progress state fills the badge with that step's OWN colour rather than a
+   single shared brand colour, so "which stage am I at" and "which stage is
+   this" stay readable at the same time. */
 .procedure-step.complete span,
 .procedure-step.active span {
-  background: var(--primary);
+  background: var(--step-color, var(--primary));
   color: #fff;
+}
+
+html[data-theme="dark"] .procedure-step.complete span,
+html[data-theme="dark"] .procedure-step.active span {
+  color: #150f24;
 }
 
 .insight-panel {
@@ -1810,6 +1870,11 @@ html[data-theme="dark"] .chart-label {
     width: 22px;
     height: 22px;
     font-size: 0.72rem;
+  }
+
+  .procedure-step span svg {
+    width: 13px;
+    height: 13px;
   }
 
   .procedure-step strong {
