@@ -2758,6 +2758,14 @@ const drawBarChart = (svg, items, options = {}) => {
     .join("");
   const baseline = `<line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" class="chart-axis-line" />`;
 
+  const barGradientId = `${svg.id || "bar"}Gradient`;
+  // Vertical gradient on the fill only — the bar's height (the encoded value)
+  // is untouched, so this adds depth without distorting what it reports.
+  const barDefs = `<defs><linearGradient id="${barGradientId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.78" />
+      <stop offset="100%" stop-color="${color}" stop-opacity="1" />
+    </linearGradient></defs>`;
+
   const bars = items
     .map((item, index) => {
       const x = left + index * slotWidth;
@@ -2770,7 +2778,7 @@ const drawBarChart = (svg, items, options = {}) => {
           : "";
       return `
         <g>
-          <path class="chart-mark" data-index="${index}" d="${path}" fill="${color}" tabindex="0" role="img" aria-label="${item.label}: ${formatChartValue(item.value)}"></path>
+          <path class="chart-mark" data-index="${index}" d="${path}" fill="url(#${barGradientId})" tabindex="0" role="img" aria-label="${item.label}: ${formatChartValue(item.value)}"></path>
           ${valueLabel}
           <text x="${x + barWidth / 2}" y="${height - bottom + 20}" text-anchor="middle" class="chart-label">${truncateLabel(item.label, maxChars)}</text>
         </g>
@@ -2778,7 +2786,7 @@ const drawBarChart = (svg, items, options = {}) => {
     })
     .join("");
 
-  svg.innerHTML = `${axis}${baseline}${bars}`;
+  svg.innerHTML = `${barDefs}${axis}${baseline}${bars}`;
 
   svg.querySelectorAll(".chart-mark").forEach((mark) => {
     const item = items[Number(mark.dataset.index)];
@@ -2849,7 +2857,7 @@ const drawLineChart = (svg, items) => {
     ${xLabels}
     <line class="chart-crosshair" id="${svg.id}Crosshair" x1="0" y1="${top}" x2="0" y2="${top + plotHeight}" style="opacity:0"></line>
     ${areaPath ? `<path d="${areaPath}" fill="var(--primary)" opacity="0.1"></path>` : ""}
-    ${count > 1 ? `<path d="${linePath}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>` : ""}
+    ${count > 1 ? `<path class="chart-line-mark" d="${linePath}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>` : ""}
     ${dots}
     ${endLabel}
   `;
