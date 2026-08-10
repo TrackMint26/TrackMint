@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="app-icon.png" />
-    <link rel="stylesheet" href="styles.css?v=27" />
+    <link rel="stylesheet" href="styles.css?v=28" />
   </head>
   <body>
     <div class="app-frame">
@@ -149,12 +149,30 @@
 
           <section class="screen active" id="dashboardScreen" data-title="Dashboard" data-eyebrow="Live business view">
             <div class="metrics" aria-label="Expense summary">
-              <article class="metric"><span>Total Spend</span><strong id="totalSpend">INR 0</strong></article>
-              <article class="metric"><span>GST Input</span><strong id="gstCredit">INR 0</strong></article>
-              <article class="metric"><span>Raw Materials</span><strong id="rawMaterialSpend">INR 0</strong></article>
-              <article class="metric"><span>Pending</span><strong id="pendingCount">0</strong></article>
-              <article class="metric"><span>Approved</span><strong id="approvedCount">0</strong></article>
-              <article class="metric"><span>Suppliers</span><strong id="supplierCount">0</strong></article>
+              <article class="metric metric-spend">
+                <i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></i>
+                <span>Total Spend</span><strong id="totalSpend">INR 0</strong>
+              </article>
+              <article class="metric metric-gst">
+                <i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1.5L8 22l2-1.5L12 22l2-1.5L16 22l2-1.5L20 22V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5Z"/><line x1="9" y1="15" x2="15" y2="9"/><circle cx="9.5" cy="9.5" r="1"/><circle cx="14.5" cy="14.5" r="1"/></svg></i>
+                <span>GST Input</span><strong id="gstCredit">INR 0</strong>
+              </article>
+              <article class="metric metric-raw">
+                <i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-9 5-9-5V8l9-5 9 5Z"/><path d="m3.3 7.3 8.7 4.9 8.7-4.9"/><line x1="12" y1="12.2" x2="12" y2="21"/></svg></i>
+                <span>Raw Materials</span><strong id="rawMaterialSpend">INR 0</strong>
+              </article>
+              <article class="metric metric-pending">
+                <i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg></i>
+                <span>Pending</span><strong id="pendingCount">0</strong>
+              </article>
+              <article class="metric metric-approved">
+                <i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.8 11.1V12a10 10 0 1 1-5.9-9.1"/><polyline points="22 4 12 14 9 11"/></svg></i>
+                <span>Approved</span><strong id="approvedCount">0</strong>
+              </article>
+              <article class="metric metric-suppliers">
+                <i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16.5 3.1a4 4 0 0 1 0 7.8"/></svg></i>
+                <span>Suppliers</span><strong id="supplierCount">0</strong>
+              </article>
             </div>
 
             <div class="dashboard-grid">

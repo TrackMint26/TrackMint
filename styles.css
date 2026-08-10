@@ -556,6 +556,77 @@ html[data-theme="dark"] .palette span::before {
   padding: 16px;
 }
 
+/* Each summary tile carries its own hue on the ICON only — the label and the
+   value stay in text ink, so colour never becomes the sole carrier of
+   meaning. Pending/Approved deliberately take the reserved warning/good
+   status colours (they really are statuses); the rest are categorical
+   identity. Both sets were run through the dataviz validator against this
+   app's own surfaces — light and dark each pass the lightness band, chroma
+   floor, CVD separation, normal-vision floor and 3:1 contrast checks. */
+.metric-spend {
+  --metric-color: #6a3fd1;
+}
+
+.metric-gst {
+  --metric-color: #d55181;
+}
+
+.metric-raw {
+  --metric-color: #2a78d6;
+}
+
+.metric-pending {
+  --metric-color: #c2790f;
+}
+
+.metric-approved {
+  --metric-color: #22a06b;
+}
+
+.metric-suppliers {
+  --metric-color: #eb6834;
+}
+
+html[data-theme="dark"] .metric-spend {
+  --metric-color: #9085e9;
+}
+
+html[data-theme="dark"] .metric-gst {
+  --metric-color: #d55181;
+}
+
+html[data-theme="dark"] .metric-raw {
+  --metric-color: #3987e5;
+}
+
+html[data-theme="dark"] .metric-pending {
+  --metric-color: #c98500;
+}
+
+html[data-theme="dark"] .metric-approved {
+  --metric-color: #199e70;
+}
+
+html[data-theme="dark"] .metric-suppliers {
+  --metric-color: #d95926;
+}
+
+.metric-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 12px;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--metric-color, var(--primary)) 15%, transparent);
+  color: var(--metric-color, var(--primary));
+}
+
+.metric-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
 .metric span {
   display: block;
   margin-bottom: 8px;
@@ -1875,6 +1946,22 @@ html[data-theme="dark"] .chart-label {
   .procedure-step span svg {
     width: 13px;
     height: 13px;
+  }
+
+  .metric {
+    padding: 13px;
+  }
+
+  .metric-icon {
+    width: 28px;
+    height: 28px;
+    margin-bottom: 9px;
+    border-radius: 8px;
+  }
+
+  .metric-icon svg {
+    width: 15px;
+    height: 15px;
   }
 
   .procedure-step strong {
