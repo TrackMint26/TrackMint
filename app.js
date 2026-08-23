@@ -3570,6 +3570,23 @@ if ("serviceWorker" in navigator) {
       console.warn("Service worker registration failed (offline support unavailable):", error);
     });
   });
+
+  // sw.js already calls skipWaiting()+clients.claim() so a new version takes
+  // over immediately rather than waiting for every tab to close — but that
+  // alone still leaves an already-open window running the OLD app.js/HTML in
+  // memory until something reloads it. An installed desktop/PWA window in
+  // particular tends to sit open across an update far longer than a browser
+  // tab does, which is exactly the gap that let a real device keep showing
+  // pre-migration local-only data after this app moved to Firebase-backed
+  // accounts. "controllerchange" fires once the new worker actually takes
+  // control, so reload right then to pick up the fresh code automatically —
+  // guarded so a page never reload-loops if this somehow fired more than once.
+  let reloadedForNewServiceWorker = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloadedForNewServiceWorker) return;
+    reloadedForNewServiceWorker = true;
+    window.location.reload();
+  });
 }
 
 const updateOfflineBadge = () => {
