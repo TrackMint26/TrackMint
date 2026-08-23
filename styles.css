@@ -947,6 +947,69 @@ html[data-theme="dark"] .chart-line-mark {
   flex: 1;
 }
 
+.import-modal-inner {
+  width: min(640px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.import-help {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.import-mapping-table {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.import-mapping-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.import-mapping-table th,
+.import-mapping-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.import-mapping-table tr:last-child td {
+  border-bottom: none;
+}
+
+.import-mapping-table select {
+  width: 100%;
+}
+
+.import-mapping-table .import-preview-cell {
+  color: var(--text-muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-summary {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.import-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #ffe4e1;
+  color: #b3261e;
+  font-size: 0.85rem;
+}
+
 .camera-error {
   margin: 0;
   padding: 10px 12px;
@@ -1743,7 +1806,7 @@ html[data-theme="dark"] .supplier-lookup-meta a {
     var(--accent) 60%,
     color-mix(in srgb, var(--accent) 88%, #000000) 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
-}
+ }
 
 .mini-item,
 .report-item {

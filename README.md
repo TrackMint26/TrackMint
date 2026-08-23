@@ -64,6 +64,23 @@ This means:
 `server.py` / `README_PROXY.md` describe an earlier, now-unused local-Tesseract
 server design — kept in the repo for reference but not required to run the app.
 
+## Importing expenses from a spreadsheet, Tally, or Zoho Books
+
+Click **Import** next to Export CSV to bring in expenses from a CSV/Excel file,
+a Tally export (Gateway of Tally → export a ledger/voucher report as XLS or
+CSV), or a Zoho Books export (Reports → Expense Details → Export). This runs
+entirely in the browser (via [SheetJS](https://sheetjs.com/), loaded the same
+way as the other CDN libraries) — no server involved, and nothing leaves the
+device except the normal sync to your own Firestore data.
+
+Since every tool names its columns differently, Track Mint guesses which
+column is Vendor/Date/Amount/etc. from the header text and shows the mapping
+for review before importing anything, rather than assuming a fixed layout.
+
+Tally itself doesn't offer a live cloud API to connect to directly (it's
+desktop software with only a local XML/ODBC interface) — this file-export/
+import path is the practical way to bring its data in today.
+
 ## Offline support
 
 A service worker (`sw.js`) caches the app shell and every script it loads —

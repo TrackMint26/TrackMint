@@ -12,7 +12,7 @@
 // previous cache instead of running two cache generations side by side. Also
 // bump it any time you need to force every device to drop a stale snapshot,
 // independent of whether sw.js's own logic changed.
-const CACHE_NAME = "track-mint-cache-v3";
+const CACHE_NAME = "track-mint-cache-v4";
 
 const PRECACHE_URLS = [
   "./",

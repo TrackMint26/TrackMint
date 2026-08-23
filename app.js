@@ -168,6 +168,16 @@ const fields = {
   alertViaSms: document.getElementById("alertViaSms"),
   alertViaEmail: document.getElementById("alertViaEmail"),
   alarmEnabled: document.getElementById("alarmEnabled"),
+  importButton: document.getElementById("importButton"),
+  importFileInput: document.getElementById("importFileInput"),
+  importModal: document.getElementById("importModal"),
+  importHelp: document.querySelector(".import-help"),
+  importError: document.getElementById("importError"),
+  importMappingTable: document.getElementById("importMappingTable"),
+  importMappingBody: document.getElementById("importMappingBody"),
+  importSummary: document.getElementById("importSummary"),
+  importConfirmButton: document.getElementById("importConfirmButton"),
+  importCancelButton: document.getElementById("importCancelButton"),
 };
 
 // The first account ever registered on this device is the business Owner.
@@ -3502,6 +3512,192 @@ document.getElementById("exportCsvButton").addEventListener("click", () => {
   link.download = "track-mint-expenses.csv";
   link.click();
 });
+
+// --- Spreadsheet import (CSV / Excel, or exports from Tally / Zoho Books) ---
+// Runs entirely client-side via SheetJS (CDN-loaded in index.html, same
+// pattern as Tesseract.js/pdf.js). Spreadsheet exports from different tools
+// name their columns differently (Tally: "Particulars"; Zoho: "Expense
+// Account"; a plain spreadsheet: anything at all) so this guesses a mapping
+// from each header's wording and lets the user confirm or correct it before
+// anything is saved — never imports blind off a fixed header list.
+const IMPORT_FIELD_DEFS = [
+  { key: "", label: "Ignore this column" },
+  { key: "vendor", label: "Vendor / Supplier", keywords: ["vendor", "supplier", "party", "payee", "paid to"] },
+  { key: "date", label: "Date", keywords: ["date"] },
+  { key: "category", label: "Category", keywords: ["category", "head", "ledger"] },
+  { key: "materialItem", label: "Material / Item", keywords: ["item", "material", "particulars", "description"] },
+  { key: "quantity", label: "Quantity", keywords: ["qty", "quantity"] },
+  { key: "amount", label: "Amount", keywords: ["amount", "value", "debit", "total"] },
+  { key: "gstin", label: "GSTIN", keywords: ["gstin", "gst no", "gst"] },
+  { key: "tax", label: "Tax", keywords: ["tax", "cgst", "sgst", "igst", "vat"] },
+  { key: "status", label: "Status", keywords: ["status"] },
+  { key: "notes", label: "Notes / Remarks", keywords: ["notes", "remark", "narration"] },
+];
+
+const guessImportField = (header) => {
+  const lower = String(header || "").toLowerCase();
+  const match = IMPORT_FIELD_DEFS.find((def) => def.keywords?.some((keyword) => lower.includes(keyword)));
+  return match ? match.key : "";
+};
+
+const KNOWN_IMPORT_CATEGORIES = ["Phone / Internet", "Travel", "Food", "Office Supplies", "Rent", "Utilities", "Raw Materials", "Staff Welfare", "Other"];
+const normalizeImportCategory = (value) => {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v) return "Other";
+  return KNOWN_IMPORT_CATEGORIES.find((c) => c.toLowerCase() === v) || "Other";
+};
+
+const KNOWN_IMPORT_STATUSES = ["Pending", "Approved", "Rejected"];
+const normalizeImportStatus = (value) => {
+  const v = String(value || "").trim().toLowerCase();
+  return KNOWN_IMPORT_STATUSES.find((s) => s.toLowerCase() === v) || "Pending";
+};
+
+// Handles an Excel date serial number and the various text date formats
+// Tally/Zoho/spreadsheet exports use (ISO, "05/01/2026", "5-Jan-2026", ...);
+// falls back to today() so one unparseable date never blocks the whole row.
+const parseImportDate = (value) => {
+  if (value === null || value === undefined || value === "") return today();
+  if (typeof value === "number") {
+    const utcDays = Math.floor(value - 25569); // Excel's day-0 is 1899-12-30
+    const parsed = new Date(utcDays * 86400 * 1000);
+    if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  }
+  const raw = String(value).trim();
+  const ddmmyyyy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (ddmmyyyy) {
+    let [, day, month, year] = ddmmyyyy;
+    if (year.length === 2) year = `20${year}`;
+    const iso = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    if (!isNaN(new Date(iso).getTime())) return iso;
+  }
+  const native = new Date(raw);
+  if (!isNaN(native.getTime()) && /\d{4}/.test(raw)) return native.toISOString().slice(0, 10);
+  return today();
+};
+
+let importParsedRows = []; // array of arrays: [headerRow, ...dataRows]
+let importColumnMap = []; // parallel to headerRow: Track Mint field key per column, "" = ignore
+
+const resetImportModal = () => {
+  importParsedRows = [];
+  importColumnMap = [];
+  fields.importError.hidden = true;
+  fields.importMappingTable.hidden = true;
+  fields.importMappingBody.innerHTML = "";
+  fields.importSummary.hidden = true;
+  fields.importConfirmButton.hidden = true;
+  fields.importHelp.hidden = false;
+};
+
+const closeImportModal = () => {
+  fields.importModal.hidden = true;
+  fields.importFileInput.value = "";
+  resetImportModal();
+};
+
+const renderImportMapping = (headerRow) => {
+  importColumnMap = headerRow.map((header) => guessImportField(header));
+  fields.importMappingBody.innerHTML = headerRow
+    .map((header, index) => {
+      const previewValues = importParsedRows
+        .slice(1, 4)
+        .map((row) => row[index])
+        .filter((value) => value !== undefined && value !== "")
+        .join(", ");
+      const options = IMPORT_FIELD_DEFS.map(
+        (def) => `<option value="${def.key}" ${def.key === importColumnMap[index] ? "selected" : ""}>${escapeHtml(def.label)}</option>`
+      ).join("");
+      return `
+        <tr>
+          <td>${escapeHtml(header || `Column ${index + 1}`)}</td>
+          <td><select data-import-column="${index}">${options}</select></td>
+          <td class="import-preview-cell" title="${escapeHtml(previewValues)}">${escapeHtml(previewValues) || "—"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  fields.importMappingTable.hidden = false;
+  fields.importHelp.hidden = true;
+  const rowCount = importParsedRows.length - 1;
+  fields.importSummary.hidden = false;
+  fields.importSummary.textContent = `${rowCount} row${rowCount === 1 ? "" : "s"} found. Review the mapping above, then import.`;
+  fields.importConfirmButton.hidden = false;
+};
+
+fields.importMappingBody.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-import-column]");
+  if (!select) return;
+  importColumnMap[Number(select.dataset.importColumn)] = select.value;
+});
+
+fields.importButton.addEventListener("click", () => {
+  resetImportModal();
+  fields.importModal.hidden = false;
+  fields.importFileInput.click();
+});
+
+fields.importFileInput.addEventListener("change", async () => {
+  const file = fields.importFileInput.files[0];
+  if (!file) return;
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: false });
+    if (!rows.length) {
+      fields.importError.hidden = false;
+      fields.importError.textContent = "That file doesn't seem to have any rows in its first sheet.";
+      return;
+    }
+    importParsedRows = rows;
+    renderImportMapping(rows[0]);
+  } catch (error) {
+    console.error("Import parse failed:", error);
+    fields.importError.hidden = false;
+    fields.importError.textContent = "Couldn't read that file. Make sure it's a CSV or Excel (.xlsx/.xls) file exported from your spreadsheet, Tally, or Zoho Books.";
+  }
+});
+
+fields.importConfirmButton.addEventListener("click", () => {
+  const dataRows = importParsedRows.slice(1);
+  let imported = 0;
+  dataRows.forEach((row) => {
+    const isBlankRow = row.every((cell) => cell === undefined || cell === "");
+    if (isBlankRow) return;
+    const values = {};
+    importColumnMap.forEach((key, index) => {
+      if (!key) return;
+      values[key] = row[index];
+    });
+    // A row with neither a vendor name nor an amount is almost certainly a
+    // stray subtotal/header line from the source report, not a real expense.
+    if (!values.vendor && !values.amount) return;
+    const expense = {
+      id: crypto.randomUUID(),
+      vendor: String(values.vendor || "").trim(),
+      supplierPhone: "",
+      date: parseImportDate(values.date),
+      category: normalizeImportCategory(values.category),
+      amount: Number(values.amount) || 0,
+      gstin: String(values.gstin || "").trim().toUpperCase(),
+      tax: Number(values.tax) || 0,
+      materialItem: String(values.materialItem || "").trim(),
+      quantity: String(values.quantity || "").trim(),
+      notes: String(values.notes || "").trim(),
+      status: normalizeImportStatus(values.status),
+    };
+    expense.aiFlags = buildAiFlags(expense);
+    state.expenses.unshift(expense);
+    imported += 1;
+  });
+  saveExpenses();
+  render();
+  closeImportModal();
+  alert(`Imported ${imported} expense${imported === 1 ? "" : "s"}.`);
+});
+
+fields.importCancelButton.addEventListener("click", closeImportModal);
 
 fields.profileForm.addEventListener("submit", (event) => {
   event.preventDefault();
