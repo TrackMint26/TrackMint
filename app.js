@@ -1,29 +1,51 @@
-const storageKey = "scanspend-expenses";
+const storageKey = "scanspend-expenses"; // kept only as the source for the one-time local-to-cloud migration below
 const settingsKey = "scanspend-settings";
 const profileKey = "scanspend-profile";
-const authKey = "scanspend-user";
-const accountsKey = "scanspend-accounts";
 const legacyStorageKey = "msme-expense-scanner-expenses";
 const legacySettingsKey = "msme-expense-scanner-settings";
-const themeKey = "scanspend-theme";
+const themeKey = "scanspend-theme"; // theme stays a per-device preference, not synced — no reason it needs to match across devices
 const paymentsKey = "track-mint-payments";
+const migratedKey = "track-mint-cloud-migrated";
 
 const readJson = (key, fallback) => JSON.parse(localStorage.getItem(key) || fallback);
 const saveJson = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 
-const loadAccounts = () => readJson(accountsKey, "{}");
-const saveAccounts = (accounts) => saveJson(accountsKey, accounts);
-const findAccountByEmail = (email) => {
-  const accounts = loadAccounts();
-  return accounts[email.toLowerCase()] || null;
+// Accounts, sessions, and all business data (expenses/payments/settings/
+// profile) now live in Firebase — Authentication for login, Firestore for
+// data — instead of this browser's own localStorage. That's what makes the
+// same email show the same content on a laptop and a phone: the account is
+// no longer tied to one device's storage.
+//
+// These values are this project's own Firebase project identifiers, not
+// secrets — they're meant to be visible in client code; access is enforced
+// by Firestore's security rules (see the ones supplied alongside this
+// change), not by hiding this config.
+const firebaseConfig = {
+  apiKey: "AIzaSyBaKAB_NO6lzyWuVxnuuO02aF2ghHuIw_8",
+  authDomain: "trackmint26.firebaseapp.com",
+  projectId: "trackmint26",
+  storageBucket: "trackmint26.firebasestorage.app",
+  messagingSenderId: "116424787867",
+  appId: "1:116424787867:web:2417080a16d149386c033e",
 };
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+// Local cache + offline write queue, on top of the existing service-worker
+// offline support — lets the app keep reading/writing expenses offline the
+// same way it already works today, syncing once the connection returns.
+// Fails harmlessly if e.g. a second tab has this app open already; the app
+// still works, just without the offline cache in that tab.
+db.enablePersistence({ synchronizeTabs: true }).catch((error) => {
+  console.warn("Firestore offline persistence unavailable:", error);
+});
 
 const state = {
-  expenses: readJson(storageKey, localStorage.getItem(legacyStorageKey) || "[]"),
-  payments: readJson(paymentsKey, "[]"),
-  settings: readJson(settingsKey, localStorage.getItem(legacySettingsKey) || "{}"),
-  profile: readJson(profileKey, "{}"),
-  user: readJson(authKey, "null"),
+  expenses: [],
+  payments: [],
+  settings: {},
+  profile: {},
+  user: null,
   selectedExpenseId: null,
   authMode: "login",
 };
@@ -179,9 +201,38 @@ const formatMonthLabel = (isoMonth) => {
   return name ? `${name} ${year}` : isoMonth;
 };
 
-const saveExpenses = () => localStorage.setItem(storageKey, JSON.stringify(state.expenses));
-const savePayments = () => localStorage.setItem(paymentsKey, JSON.stringify(state.payments));
-const saveProfile = () => localStorage.setItem(profileKey, JSON.stringify(state.profile));
+// Whole-array-per-document: one Firestore doc holds the entire expenses (or
+// payments) array. This is deliberately simple rather than "one Firestore
+// doc per expense" (the more scalable design) because every existing
+// "mutate state.expenses, then call saveExpenses()" call site throughout
+// this file keeps working completely unchanged — only these two functions
+// needed to change. Tradeoff, disclosed rather than hidden: a Firestore
+// document has a 1 MiB size limit, which comfortably covers a small
+// business's expense history (thousands of records at this data's size) but
+// isn't unlimited. If that ceiling is ever actually hit, the fix is moving
+// to one document per expense (a subcollection) — a data-layer change, not
+// another rewrite of every call site.
+const userDataDoc = (name) => db.collection("users").doc(state.user.uid).collection("data").doc(name);
+const userProfileDoc = () => db.collection("users").doc(state.user.uid);
+
+const saveExpenses = () => {
+  if (!state.user?.uid) return;
+  userDataDoc("expenses")
+    .set({ list: state.expenses })
+    .catch((error) => console.warn("Failed to sync expenses to your account:", error));
+};
+const savePayments = () => {
+  if (!state.user?.uid) return;
+  userDataDoc("payments")
+    .set({ list: state.payments })
+    .catch((error) => console.warn("Failed to sync payments to your account:", error));
+};
+const saveProfile = () => {
+  if (!state.user?.uid) return;
+  userProfileDoc()
+    .set({ profile: state.profile }, { merge: true })
+    .catch((error) => console.warn("Failed to sync profile to your account:", error));
+};
 const saveSettings = () => {
   if (!isOwner()) return;
   state.settings = {
@@ -192,7 +243,10 @@ const saveSettings = () => {
     alertViaEmail: fields.alertViaEmail.checked,
     alarmEnabled: fields.alarmEnabled.checked,
   };
-  localStorage.setItem(settingsKey, JSON.stringify(state.settings));
+  if (!state.user?.uid) return;
+  userProfileDoc()
+    .set({ settings: state.settings }, { merge: true })
+    .catch((error) => console.warn("Failed to sync settings to your account:", error));
 };
 
 // Non-owner users may still see the current alert configuration (for transparency)
@@ -2991,7 +3045,130 @@ const loadSettingsFields = () => {
   applySettingsAccess();
 };
 
-fields.authForm.addEventListener("submit", (event) => {
+const authErrorMessage = (error) => {
+  switch (error.code) {
+    case "auth/email-already-in-use":
+      return "An account with that email already exists. Please login instead.";
+    case "auth/invalid-email":
+      return "Enter a valid email address.";
+    case "auth/weak-password":
+      return "Password must be at least 6 characters.";
+    case "auth/wrong-password":
+    case "auth/user-not-found":
+    case "auth/invalid-credential":
+      return "Login failed. Please check your email and password.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Please wait a moment and try again.";
+    case "auth/network-request-failed":
+      return "Network error — check your internet connection and try again.";
+    default:
+      return `Something went wrong (${error.message || "please try again"}).`;
+  }
+};
+
+let unsubscribeUserDoc = null;
+let unsubscribeExpenses = null;
+let unsubscribePayments = null;
+
+const detachUserDataListeners = () => {
+  [unsubscribeUserDoc, unsubscribeExpenses, unsubscribePayments].forEach((unsubscribe) => unsubscribe && unsubscribe());
+  unsubscribeUserDoc = null;
+  unsubscribeExpenses = null;
+  unsubscribePayments = null;
+};
+
+// One-time only, guarded by a local flag: if this browser still has
+// expenses/payments/settings from before this account existed in the cloud
+// (the old localStorage-only version of this app), carry that history into
+// the newly created/signed-in account instead of silently losing it. Only
+// writes into fields that are still empty in the cloud, so it can never
+// clobber real cloud data with stale local data on a later login.
+const migrateLocalDataIfNeeded = async () => {
+  if (localStorage.getItem(migratedKey)) return;
+  const localExpenses = readJson(storageKey, localStorage.getItem(legacyStorageKey) || "[]");
+  const localPayments = readJson(paymentsKey, "[]");
+  const localSettings = readJson(settingsKey, localStorage.getItem(legacySettingsKey) || "{}");
+  const localProfile = readJson(profileKey, "{}");
+
+  try {
+    const [expensesDoc, paymentsDoc] = await Promise.all([userDataDoc("expenses").get(), userDataDoc("payments").get()]);
+    if (!expensesDoc.exists && localExpenses.length) {
+      await userDataDoc("expenses").set({ list: localExpenses });
+    }
+    if (!paymentsDoc.exists && localPayments.length) {
+      await userDataDoc("payments").set({ list: localPayments });
+    }
+    if (Object.keys(localSettings).length || Object.keys(localProfile).length) {
+      await userProfileDoc().set({ settings: localSettings, profile: localProfile }, { merge: true });
+    }
+    localStorage.setItem(migratedKey, "1");
+  } catch (error) {
+    console.warn("Local-to-cloud migration failed (will retry next login):", error);
+  }
+};
+
+// Subscribes to this account's Firestore data and resolves once the first
+// reading of all three documents has arrived — so showApp() never flashes
+// an empty dashboard before the real data loads. After that first load,
+// each listener keeps state in sync live, including from a change made on
+// another device (or another tab).
+const loadUserData = () =>
+  new Promise((resolve) => {
+    const ready = { profile: false, expenses: false, payments: false };
+    let resolved = false;
+    const maybeResolve = () => {
+      if (resolved || !ready.profile || !ready.expenses || !ready.payments) return;
+      resolved = true;
+      resolve();
+    };
+
+    unsubscribeUserDoc = userProfileDoc().onSnapshot(
+      (doc) => {
+        const data = doc.data() || {};
+        state.profile = data.profile || {};
+        state.settings = data.settings || {};
+        ready.profile = true;
+        maybeResolve();
+        if (resolved) {
+          loadProfileFields();
+          loadSettingsFields();
+        }
+      },
+      (error) => {
+        console.warn("Profile/settings sync error:", error);
+        ready.profile = true;
+        maybeResolve();
+      }
+    );
+    unsubscribeExpenses = userDataDoc("expenses").onSnapshot(
+      (doc) => {
+        state.expenses = (doc.data() || {}).list || [];
+        ready.expenses = true;
+        maybeResolve();
+        if (resolved) render();
+      },
+      (error) => {
+        console.warn("Expenses sync error:", error);
+        ready.expenses = true;
+        maybeResolve();
+      }
+    );
+    unsubscribePayments = userDataDoc("payments").onSnapshot(
+      (doc) => {
+        state.payments = (doc.data() || {}).list || [];
+        ready.payments = true;
+        maybeResolve();
+        if (resolved) render();
+      },
+      (error) => {
+        console.warn("Payments sync error:", error);
+        ready.payments = true;
+        maybeResolve();
+      }
+    );
+  });
+
+fields.authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const email = fields.authEmail.value.trim().toLowerCase();
   const password = fields.authPassword.value;
@@ -3001,47 +3178,36 @@ fields.authForm.addEventListener("submit", (event) => {
     alert("Email and password are required.");
     return;
   }
-  if (password.length < 4) {
-    alert("Password must be at least 4 characters.");
+  if (password.length < 6) {
+    alert("Password must be at least 6 characters.");
     return;
   }
 
   // Determine mode from global variable or button state
   const isRegisterMode = window.currentAuthMode === 'register' || document.querySelector('[data-auth-mode="register"]')?.classList.contains('active');
 
-  const accounts = loadAccounts();
-  const existing = accounts[email];
-
-  if (isRegisterMode) {
-    if (existing) {
-      alert("An account with that email already exists. Please login or use a different email.");
-      return;
+  fields.authSubmitButton.disabled = true;
+  try {
+    if (isRegisterMode) {
+      const credential = await auth.createUserWithEmailAndPassword(email, password);
+      // Every account owns its own data outright now that data is scoped
+      // per-account in the cloud rather than shared per-browser, so there's
+      // no "first person on this device" Owner race to resolve anymore.
+      await db
+        .collection("users")
+        .doc(credential.user.uid)
+        .set({ profile: { name, email }, settings: {} }, { merge: true });
+    } else {
+      await auth.signInWithEmailAndPassword(email, password);
     }
-    // The first account ever created on this device becomes the Owner.
-    const isFirstAccount = Object.keys(accounts).length === 0;
-    accounts[email] = { name, email, password, isOwner: isFirstAccount };
-    saveAccounts(accounts);
-    state.user = { name, email, isOwner: isFirstAccount };
-  } else {
-    if (!existing || existing.password !== password) {
-      alert("Login failed. Please check your email and password.");
-      return;
-    }
-    // Accounts created before Owner-controlled settings existed have no isOwner
-    // flag. Grandfather in whoever logs in first, so nobody gets locked out.
-    const noOwnerYet = !Object.values(accounts).some((account) => account.isOwner);
-    if (noOwnerYet) {
-      existing.isOwner = true;
-      accounts[email] = existing;
-      saveAccounts(accounts);
-    }
-    state.user = { name: existing.name || name, email, isOwner: !!existing.isOwner };
+    // auth.onAuthStateChanged (registered near the bottom of this file)
+    // picks up the signed-in user from here, loads their Firestore data,
+    // and calls showApp() once that data has actually arrived.
+  } catch (error) {
+    alert(authErrorMessage(error));
+  } finally {
+    fields.authSubmitButton.disabled = false;
   }
-
-  localStorage.setItem(authKey, JSON.stringify(state.user));
-  state.profile = { ...state.profile, name: state.user.name, email: state.user.email };
-  saveProfile();
-  showApp();
 });
 
 fields.authModeButtons.forEach((button) => button.addEventListener("click", () => setAuthMode(button.dataset.authMode)));
@@ -3053,9 +3219,8 @@ fields.navButtons.forEach((button) =>
 );
 fields.quickScanButton.addEventListener("click", () => setScreen("scan"));
 const doLogout = () => {
-  localStorage.removeItem(authKey);
-  state.user = null;
-  showAuth();
+  detachUserDataListeners();
+  auth.signOut();
 };
 fields.logoutButton.addEventListener("click", doLogout);
 
@@ -3415,21 +3580,23 @@ window.addEventListener("offline", updateOfflineBadge);
 updateOfflineBadge();
 
 setAuthMode("login");
-if (state.user) {
-  // Re-sync the Owner flag from the accounts store in case a session cached
-  // before this feature existed, or before an owner had been assigned yet.
-  const accounts = loadAccounts();
-  const storedAccount = accounts[state.user.email];
-  if (storedAccount) {
-    if (!Object.values(accounts).some((account) => account.isOwner)) {
-      storedAccount.isOwner = true;
-      accounts[state.user.email] = storedAccount;
-      saveAccounts(accounts);
-    }
-    state.user.isOwner = !!storedAccount.isOwner;
-    localStorage.setItem(authKey, JSON.stringify(state.user));
+// Fires once on load with whatever session Firebase has cached (or null),
+// and again on every future sign-in/sign-out — this is the async
+// replacement for the old synchronous "read localStorage, decide screen"
+// check, since a real login now has to be confirmed with the server first.
+auth.onAuthStateChanged(async (firebaseUser) => {
+  if (firebaseUser) {
+    state.user = { uid: firebaseUser.uid, email: firebaseUser.email, name: "Track Mint User", isOwner: true };
+    await migrateLocalDataIfNeeded();
+    await loadUserData();
+    showApp();
+  } else {
+    detachUserDataListeners();
+    state.user = null;
+    state.expenses = [];
+    state.payments = [];
+    state.profile = {};
+    state.settings = {};
+    showAuth();
   }
-  showApp();
-} else {
-  showAuth();
-}
+});
