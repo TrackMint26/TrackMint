@@ -797,11 +797,17 @@ const parseAmount = (text) => {
 };
 
 const parseTax = (text, subtotalHint) => {
-  // Allow an optional "(9%)" OR "@9%" rate call-out between the label and the
-  // amount (e.g. "CGST (9%): ₹576.00" or "CGST @9% 8,100.00" — the latter is
-  // the standard notation on Indian tax invoices) so the rate digit isn't
-  // mistaken for the amount. Rate is captured too (see cross-check below).
-  const taxPattern = /\b(cgst|sgst|igst)\b\s*(?:[@(]\s*([\d.]+)\s*%\s*\)?)?\s*[:\-]?\s*[^\d\n]{0,20}([\d,]+(?:\.\d{1,2})?)/gi;
+  // Allow an optional rate call-out between the label and the amount — as
+  // "(9%)"/"@9%" (narrative invoices: "CGST (9%): ₹576.00", "CGST @9%
+  // 8,100.00") but just as often as a bare "9%" with no leading @/( at all,
+  // which is how most tabular GST invoices lay out Tax Type/Rate/Amount as
+  // separate columns (OCR'd as "CGST   9%   576.00"). The [@(]? here is
+  // deliberately optional for that reason — without it, a bare "9%" isn't
+  // recognized as a rate at all, so [^\d\n]{0,20} (which stops at the first
+  // digit) can't skip over it, and the regex falls through to capturing the
+  // lone rate digit itself ("9") as the tax amount instead of the real
+  // amount later on the line. Rate is captured too (see cross-check below).
+  const taxPattern = /\b(cgst|sgst|igst)\b\s*(?:[@(]?\s*([\d.]+)\s*%\s*\)?)?\s*[:\-]?\s*[^\d\n]{0,20}([\d,]+(?:\.\d{1,2})?)/gi;
   const entries = [...text.matchAll(taxPattern)].map((match) => {
     const rate = match[2] ? Number(match[2]) : null;
     // When a subtotal is independently known and this line states its own
