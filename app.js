@@ -117,6 +117,10 @@ const fields = {
   supplierCount: document.getElementById("supplierCount"),
   alertPanel: document.getElementById("alertPanel"),
   alertMessage: document.getElementById("alertMessage"),
+  // sendSmsButton no longer sends SMS (that alert channel was removed) — the
+  // element is kept because it's dual-purpose: updateAlertBanner() reuses it
+  // as the "Review Expense" action for the duplicate-bill alert, unrelated
+  // to phone/email settings entirely. Not renamed to minimize the diff.
   sendSmsButton: document.getElementById("sendSmsButton"),
   sendEmailButton: document.getElementById("sendEmailButton"),
   categoryBars: document.getElementById("categoryBars"),
@@ -163,9 +167,7 @@ const fields = {
   settingsOwnerNote: document.getElementById("settingsOwnerNote"),
   saveSettingsButton: document.getElementById("saveSettingsButton"),
   rawMaterialLimit: document.getElementById("rawMaterialLimit"),
-  alertPhone: document.getElementById("alertPhone"),
   alertEmail: document.getElementById("alertEmail"),
-  alertViaSms: document.getElementById("alertViaSms"),
   alertViaEmail: document.getElementById("alertViaEmail"),
   alarmEnabled: document.getElementById("alarmEnabled"),
   importButton: document.getElementById("importButton"),
@@ -247,9 +249,7 @@ const saveSettings = () => {
   if (!isOwner()) return;
   state.settings = {
     rawMaterialLimit: fields.rawMaterialLimit.value,
-    alertPhone: fields.alertPhone.value,
     alertEmail: fields.alertEmail.value,
-    alertViaSms: fields.alertViaSms.checked,
     alertViaEmail: fields.alertViaEmail.checked,
     alarmEnabled: fields.alarmEnabled.checked,
   };
@@ -265,9 +265,7 @@ const applySettingsAccess = () => {
   const owner = isOwner();
   const lockedFields = [
     fields.rawMaterialLimit,
-    fields.alertPhone,
     fields.alertEmail,
-    fields.alertViaSms,
     fields.alertViaEmail,
     fields.alarmEnabled,
   ];
@@ -308,14 +306,8 @@ const isPlausibleBillDate = (isoDate) => {
   return year >= currentYear - 5 && year <= currentYear + 1;
 };
 const isRawMaterial = (expense) => expense.category === "Raw Materials";
-const cleanPhone = (phone) => phone.replace(/[^\d+]/g, "");
 const getRawMaterialTotal = () =>
   state.expenses.filter(isRawMaterial).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-
-const buildSmsUrl = (phone, message) => {
-  const separator = /iphone|ipad|ipod/i.test(navigator.userAgent) ? "&" : "?";
-  return `sms:${cleanPhone(phone)}${separator}body=${encodeURIComponent(message)}`;
-};
 
 const byAmount = (items) => items.sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
 
@@ -1928,12 +1920,6 @@ const playAlarm = () => {
   }
 };
 
-const getAlertPhone = () => {
-  const explicit = state.settings.alertPhone?.trim();
-  if (explicit) return explicit;
-  return state.profile.businessPhone?.trim() || "";
-};
-
 const getAlertEmail = () => {
   const explicit = state.settings.alertEmail?.trim();
   if (explicit) return explicit;
@@ -1944,9 +1930,7 @@ const buildMailtoUrl = (email, subject, message) =>
   `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
 
 const showSupplyAlert = (expense, rawTotal, limit, playSound = true) => {
-  const phone = getAlertPhone();
   const email = getAlertEmail();
-  const smsEnabled = state.settings.alertViaSms !== false;
   const emailEnabled = !!state.settings.alertViaEmail;
   const targetLabel = "Owner/Manager";
   const message = [
@@ -1960,10 +1944,10 @@ const showSupplyAlert = (expense, rawTotal, limit, playSound = true) => {
   fields.alertPanel.hidden = false;
   fields.alertMessage.textContent = message;
 
-  const showSms = smsEnabled;
-  fields.sendSmsButton.hidden = !showSms;
-  fields.sendSmsButton.href = phone ? buildSmsUrl(phone, message) : "#";
-  fields.sendSmsButton.textContent = phone ? `Send SMS Alert to ${targetLabel}` : "Add Alert Phone in Settings";
+  // SMS alerting was removed — this button stays hidden for the raw-material
+  // alert case now; it's only ever shown by updateAlertBanner()'s separate
+  // duplicate-bill branch, repurposed there as "Review Expense".
+  fields.sendSmsButton.hidden = true;
 
   const showEmail = emailEnabled;
   fields.sendEmailButton.hidden = !showEmail;
@@ -3053,9 +3037,7 @@ const loadProfileFields = () => {
 
 const loadSettingsFields = () => {
   fields.rawMaterialLimit.value = state.settings.rawMaterialLimit || "";
-  fields.alertPhone.value = state.settings.alertPhone || "";
   fields.alertEmail.value = state.settings.alertEmail || "";
-  fields.alertViaSms.checked = state.settings.alertViaSms !== false;
   fields.alertViaEmail.checked = !!state.settings.alertViaEmail;
   fields.alarmEnabled.checked = state.settings.alarmEnabled !== false;
   applySettingsAccess();
@@ -3445,19 +3427,16 @@ fields.rows.addEventListener("change", (event) => {
   render();
 });
 
+// Only ever fires in its "Review Expense" (duplicate-alert) mode now that
+// SMS alerting is gone — see the field-definition comment above.
 fields.sendSmsButton.addEventListener("click", (event) => {
   if (fields.sendSmsButton.getAttribute("href") === "#") {
     event.preventDefault();
-    if (fields.sendSmsButton.textContent === "Review Expense") {
-      // The complete flagged set — same definition as the alert's count and
-      // the Reports tile — so however many the alert says, that many rows show up here.
-      duplicateFilterIds = getFlaggedDuplicateExpenses().map((expense) => expense.id);
-      setScreen("expenses");
-      render();
-      return;
-    }
-    setScreen("settings");
-    if (isOwner()) fields.alertPhone.focus();
+    // The complete flagged set — same definition as the alert's count and
+    // the Reports tile — so however many the alert says, that many rows show up here.
+    duplicateFilterIds = getFlaggedDuplicateExpenses().map((expense) => expense.id);
+    setScreen("expenses");
+    render();
   }
 });
 
@@ -3729,7 +3708,7 @@ fields.settingsForm.addEventListener("submit", (event) => {
   alert("Settings saved.");
 });
 
-[fields.rawMaterialLimit, fields.alertPhone, fields.alertEmail, fields.alertViaSms, fields.alertViaEmail, fields.alarmEnabled].forEach((field) => {
+[fields.rawMaterialLimit, fields.alertEmail, fields.alertViaEmail, fields.alarmEnabled].forEach((field) => {
   field.addEventListener("change", saveSettings);
 });
 

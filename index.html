@@ -503,9 +503,7 @@
                 <h2>Supply Alert Settings</h2>
                 <p class="owner-note" id="settingsOwnerNote" hidden>Only the account owner can view or change alert settings. Contact the business owner to update these.</p>
                 <label class="field"><span>Raw Material Limit</span><input id="rawMaterialLimit" type="number" min="0" step="0.01" placeholder="Monthly limit" /></label>
-                <label class="field"><span>Alert Phone</span><input id="alertPhone" type="tel" placeholder="Owner or manager mobile" /></label>
                 <label class="field"><span>Alert Email</span><input id="alertEmail" type="email" placeholder="Owner or manager email" /></label>
-                <label class="check-field"><input id="alertViaSms" type="checkbox" checked /><span>Send alerts by SMS</span></label>
                 <label class="check-field"><input id="alertViaEmail" type="checkbox" /><span>Send alerts by Email</span></label>
                 <label class="check-field"><input id="alarmEnabled" type="checkbox" checked /><span>Play alarm when raw material limit is crossed</span></label>
                 <button class="primary" type="submit" id="saveSettingsButton">Save Settings</button>
@@ -584,7 +582,7 @@
       // Track auth mode globally
       window.currentAuthMode = 'login';
     </script>
-    <script src="app.js?v=46"></script>
+    <script src="app.js?v=47"></script>
     <script>
       // Ensure auth mode buttons work
       document.addEventListener('DOMContentLoaded', function() {
